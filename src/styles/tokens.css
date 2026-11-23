@@ -1,0 +1,130 @@
+/*
+ * X6 Studio — tokens de diseño.
+ * Paleta y proporciones tomadas como referencia de ATK V HUB (modo oscuro / claro).
+ * Todo el "look" vive acá: colores, superficies, radios, tipografías y fondo.
+ */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f0f0f;
+  --bg-sidebar: #141414;
+  --modal: #1f1f1f;
+
+  /* Texto (blanco con opacidades, como ATK) */
+  --fg: rgb(255 255 255 / 0.88);
+  --fg-2: rgb(255 255 255 / 0.65);
+  --fg-3: rgb(255 255 255 / 0.45);
+  --fg-4: rgb(255 255 255 / 0.25);
+
+  /* Superficies */
+  --surface: #18181a;
+  --surface-2: rgb(255 255 255 / 0.06);
+  --surface-3: rgb(255 255 255 / 0.1);
+  --surface-hover: rgb(255 255 255 / 0.08);
+  --border: rgb(255 255 255 / 0.08);
+  --border-2: rgb(255 255 255 / 0.16);
+  --track: rgb(255 255 255 / 0.12);
+  --switch-off: rgb(255 255 255 / 0.22);
+  --card-shadow: 0 10px 40px rgb(0 0 0 / 0.4);
+  --dot-color: rgb(255 255 255 / 0.42);
+
+  /* "Primario" = lo seleccionado: blanco con texto negro */
+  --primary: #ffffff;
+  --on-primary: #000000;
+
+  /* Funcionales */
+  --success: #2fcb64;
+  --warning: #f5b334;
+  --danger: #ff4d4f;
+
+  /* Escritorio simulado */
+  --wallpaper-desktop: radial-gradient(55% 60% at 72% 62%, #1f3f9e 0%, transparent 62%),
+    radial-gradient(40% 45% at 28% 30%, #4b2a9e 0%, transparent 60%), #05070f;
+  --taskbar-bg: rgb(28 28 30 / 0.86);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #edeef3;
+  --bg-sidebar: #f6f6f9;
+  --modal: #ffffff;
+
+  --fg: rgb(0 0 0 / 0.88);
+  --fg-2: rgb(0 0 0 / 0.65);
+  --fg-3: rgb(0 0 0 / 0.45);
+  --fg-4: rgb(0 0 0 / 0.25);
+
+  --surface: #ffffff;
+  --surface-2: rgb(0 0 0 / 0.04);
+  --surface-3: rgb(0 0 0 / 0.08);
+  --surface-hover: rgb(0 0 0 / 0.06);
+  --border: rgb(0 0 0 / 0.08);
+  --border-2: rgb(0 0 0 / 0.16);
+  --track: rgb(0 0 0 / 0.1);
+  --switch-off: rgb(0 0 0 / 0.18);
+  --card-shadow: 0 10px 30px rgb(30 30 60 / 0.08);
+  --dot-color: rgb(0 0 0 / 0.3);
+
+  --primary: #000000;
+  --on-primary: #ffffff;
+
+  --wallpaper-desktop: radial-gradient(55% 60% at 72% 62%, #8fb0ff 0%, transparent 62%),
+    radial-gradient(40% 45% at 28% 30%, #c4b2ff 0%, transparent 60%), #dfe6fb;
+  --taskbar-bg: rgb(238 240 248 / 0.88);
+}
+
+:root {
+  /* Color del fondo liso en modo vidrio (configurable en Fondos) */
+  --glass-color: #050506;
+
+  /* Color de tema (configurable en Apariencia) */
+  --accent: #ff7a1a;
+  --accent-2: #3d6bd6;
+  --gradient: linear-gradient(90deg, var(--accent-2), var(--accent));
+
+  /* Forma */
+  --r-card: 14px;
+  --r-control: 8px;
+  --r-option: 6px;
+  --gap: 16px;
+
+  /* Tipografías (ver fonts.css y el selector de fuentes en Apariencia) */
+  --font-ui: "OPPO Sans 4.0", "OPPOSans", "HarmonyOS Sans SC", "HarmonyOS Sans", "Segoe UI Variable Text",
+    "Segoe UI", system-ui, sans-serif;
+  --font-num: "D-DIN", var(--font-ui);
+
+  /* Fondo personalizable (Apariencia → Fondo) */
+  --wall-blur: 0px;
+  --wall-brightness: 1;
+}
+
+/* ── Modo "vidrio": fondo de color liso (o imagen propia) y tarjetas translúcidas ── */
+[data-wallpaper="glass"] {
+  --bg: var(--glass-color);
+}
+
+[data-theme="light"][data-wallpaper="glass"] {
+  /* en tema claro se usa un tinte suave del color elegido, para mantener el contraste */
+  --bg: color-mix(in srgb, var(--glass-color) 14%, #eef0f6);
+}
+
+[data-wallpaper="glass"],
+[data-wallpaper="custom"] {
+  --bg-sidebar: rgb(255 255 255 / 0.05);
+  --surface: rgb(255 255 255 / 0.05);
+  --surface-2: rgb(255 255 255 / 0.07);
+  --border: rgb(255 255 255 / 0.1);
+  --modal: rgb(28 28 32 / 0.92);
+}
+
+[data-theme="light"][data-wallpaper="glass"],
+[data-theme="light"][data-wallpaper="custom"] {
+  --bg-sidebar: rgb(255 255 255 / 0.5);
+  --surface: rgb(255 255 255 / 0.55);
+  --surface-2: rgb(0 0 0 / 0.04);
+  --border: rgb(255 255 255 / 0.75);
+  --modal: rgb(255 255 255 / 0.94);
+}

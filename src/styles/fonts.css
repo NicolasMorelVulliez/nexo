@@ -1,0 +1,35 @@
+/*
+ * Tipografías.
+ * - D-DIN (Datto, SIL OFL 1.1) se incluye en /public/fonts para los números grandes.
+ * - OPPO Sans 4.0 y HarmonyOS Sans se usan si están instaladas en el sistema (local()).
+ *   Sus licencias permiten uso gratuito (incluso comercial) pero no redistribuirlas:
+ *   se descargan de los sitios oficiales de OPPO y Huawei. Cuando estén los archivos,
+ *   se agregan acá con url("/fonts/…").
+ */
+
+@font-face {
+  font-family: "D-DIN";
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/D-DIN-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "D-DIN";
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/D-DIN.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "OPPO Sans 4.0";
+  font-display: swap;
+  src: local("OPPO Sans 4.0"), local("OPPOSans4.0"), local("OPPO Sans 4.0 Medium"), local("OPPOSans");
+}
+
+@font-face {
+  font-family: "HarmonyOS Sans SC";
+  font-display: swap;
+  src: local("HarmonyOS Sans SC Medium"), local("HarmonyOS_Sans_SC_Medium"), local("HarmonyOS Sans SC"),
+    local("HarmonyOS Sans");
+}
