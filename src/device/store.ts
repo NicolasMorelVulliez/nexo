@@ -1,4 +1,7 @@
 import { create } from "zustand"
+import { rawmCaps } from "../devices/rawm"
+import { DEFAULT_RAWM_MODEL } from "../devices/rawm-models"
+import { X6_CAPS } from "../devices/x6"
 import {
   params,
   type DeviceSection,
@@ -10,7 +13,7 @@ import type { DeviceIdentity } from "./identity"
 import { createMockMouse, DEFAULT_REMAPS } from "./mock"
 import { loadPrefs, type Persisted } from "./persist"
 import { isTauri } from "./transport"
-import type { ButtonId, LightState, MouseState } from "./types"
+import type { ButtonId, Capabilities, LightState, MouseState } from "./types"
 
 export type Shell = "web" | "desktop"
 export type ThemeMode = "dark" | "light" | "system"
@@ -52,6 +55,8 @@ interface StoreState {
   fontDrawer: boolean
   connected: boolean
   identity: DeviceIdentity
+  /** qué soporta el mouse activo (lo define el driver) */
+  caps: Capabilities
   mouse: MouseState
   selectedButton: ButtonId
   savedAt: number
@@ -76,6 +81,8 @@ interface StoreState {
   setSettingsSection: (s: SettingsSection) => void
   setFontDrawer: (open: boolean) => void
   connect: () => void
+  /** Web: abre el selector para elegir otro mouse. Escritorio: pasa al otro mouse conectado. */
+  addDevice: () => void
   disconnect: () => void
   setFlyout: (open: boolean) => void
   toggleSidebar: () => void
@@ -94,12 +101,41 @@ interface StoreState {
 export const LIVE = !params.mockup
 
 /** El controlador en vivo registra acá cómo conectar (evita una importación circular). */
-export const hooks: { connect: null | ((interactive: boolean) => void) } = { connect: null }
+export const hooks: { connect: null | ((interactive: boolean) => void); switchDevice: null | (() => void) } = {
+  connect: null,
+  switchDevice: null,
+}
 
 // En modo real el "Guardado en el mouse" lo marca el controlador cuando el envío termina.
 const saved = () => (LIVE ? {} : { savedAt: Date.now() })
 
 const prefs: Persisted = LIVE ? loadPrefs() : {}
+
+/** Mouse simulado del mockup (?device=es21) o, en modo real, el último usado hasta que conecte. */
+const mockEs21 = LIVE ? prefs.lastFamily === "rawm" : params.device === "es21"
+const initialCaps: Capabilities = mockEs21 ? rawmCaps(DEFAULT_RAWM_MODEL) : X6_CAPS
+const initialIdentity: DeviceIdentity = mockEs21
+  ? { vendor: "RAWM", product: DEFAULT_RAWM_MODEL.name, vid: 0x1915, pid: 0x233c, source: "firmware" }
+  : LIVE
+    ? {
+        vendor: prefs.deviceName?.vendor ?? "Motospeed",
+        product: prefs.deviceName?.product ?? "X6",
+        vid: 0x0bda,
+        pid: 0xffe0,
+        source: prefs.deviceName ? "recordado" : "por defecto",
+      }
+    : { vendor: "Motospeed", product: "X6 Max", vid: 0x0bda, pid: 0xffe0, source: "recordado" }
+const es21Mock: Partial<MouseState> = {
+  dpi: [400, 800, 1600, 3200, 6400, 12800, 1600, 1600],
+  dpiSlot: 2,
+  dpiCount: 6,
+  pollingIndex: 3,
+  powerMode: 2,
+  debounceMs: 4,
+  sleepSec: 60,
+  scrollForward: true,
+  light: { mode: "dpi", color: { r: 255, g: 255, b: 255 }, brightness: 160, speed: 128, autoOff: true },
+}
 
 /** Nombre real del dispositivo, p. ej. "Motospeed X6 Max". */
 export const useDeviceName = () => useStore((s) => `${s.identity.vendor} ${s.identity.product}`)
@@ -113,20 +149,14 @@ export const useStore = create<StoreState>((set) => ({
   settingsSection: params.settingsSection,
   fontDrawer: params.fontDrawer,
   connected: params.connected,
-  // En la app real sale de HIDDevice.productName / hidapi (ver identity.ts).
-  identity: LIVE
-    ? {
-        vendor: prefs.deviceName?.vendor ?? "Motospeed",
-        product: prefs.deviceName?.product ?? "X6",
-        vid: 0x0bda,
-        pid: 0xffe0,
-        source: prefs.deviceName ? "recordado" : "por defecto",
-      }
-    : { vendor: "Motospeed", product: "X6 Max", vid: 0x0bda, pid: 0xffe0, source: "recordado" },
+  // En la app real sale de HIDDevice.productName / hidapi o del firmware (ver identity.ts).
+  identity: initialIdentity,
+  caps: initialCaps,
   mouse: createMockMouse({
+    ...(mockEs21 ? es21Mock : {}),
     charging: params.charging,
     ...(params.battery !== undefined ? { battery: params.battery } : {}),
-    ...(prefs.light ? { light: prefs.light as never } : {}),
+    ...(prefs.light && !mockEs21 ? { light: prefs.light as never } : {}),
     ...(prefs.remaps ? { remaps: prefs.remaps as never } : {}),
   }),
   selectedButton: "side1",
@@ -177,6 +207,7 @@ export const useStore = create<StoreState>((set) => ({
   setSettingsSection: (settingsSection) => set({ settingsSection }),
   setFontDrawer: (fontDrawer) => set({ fontDrawer }),
   connect: () => (hooks.connect ? hooks.connect(true) : set({ connected: true })),
+  addDevice: () => (isTauri() ? hooks.switchDevice?.() : hooks.connect?.(true)),
   disconnect: () => set({ connected: false, tab: "home", deviceTabOpen: false }),
   setFlyout: (flyoutOpen) => set({ flyoutOpen }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

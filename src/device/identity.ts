@@ -14,8 +14,8 @@ export interface DeviceIdentity {
   product: string
   vid: number
   pid: number
-  /** de dónde salió el nombre */
-  source: "cable" | "recordado" | "por defecto"
+  /** de dónde salió el nombre ("firmware" = el mouse lo informa por protocolo, p. ej. RAWM) */
+  source: "cable" | "firmware" | "recordado" | "por defecto"
 }
 
 /** Nombres genéricos de receptores que no identifican el modelo. */

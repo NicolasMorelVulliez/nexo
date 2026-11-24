@@ -7,6 +7,7 @@
 //   &wallpaper=dots|glass|plain   (dots = ATK con puntos animados, glass = vidrio color liso)
 //   &glass=RRGGBB                 color del vidrio
 //   &flyout=1 &tooltip=1 &charging=1 &battery=NN
+//   &device=x6|es21       mouse simulado (por defecto x6)
 //   &shot=1               oculta el selector (para capturas)
 
 export type Tab = "home" | "device" | "settings"
@@ -51,5 +52,6 @@ export const params = {
   flyout: q.get("flyout") === "1",
   tooltip: q.get("tooltip") === "1",
   charging: q.get("charging") === "1",
+  device: (q.get("device") === "es21" ? "es21" : "x6") as "x6" | "es21",
   battery: q.has("battery") ? Math.max(0, Math.min(100, Number(q.get("battery")))) : undefined,
 }

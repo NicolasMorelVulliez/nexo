@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 422 767" width="422" height="767">
+  <!-- Silueta genérica de mouse simétrico (vista superior), dibujada para Nexo. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34343a"/>
+      <stop offset="0.55" stop-color="#1c1c20"/>
+      <stop offset="1" stop-color="#101012"/>
+    </linearGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2e2e34"/>
+      <stop offset="1" stop-color="#1a1a1e"/>
+    </linearGradient>
+    <radialGradient id="sheen" cx="0.38" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wheel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0c0c0e"/>
+      <stop offset="0.5" stop-color="#3c3c44"/>
+      <stop offset="1" stop-color="#0c0c0e"/>
+    </linearGradient>
+  </defs>
+  <!-- cuerpo -->
+  <path d="M211 16 C302 16 370 62 383 172 C395 282 404 420 398 540 C392 672 320 752 211 752 C102 752 30 672 24 540 C18 420 27 282 39 172 C52 62 120 16 211 16 Z"
+        fill="url(#body)" stroke="#45454d" stroke-width="2.5"/>
+  <!-- botones principales -->
+  <path d="M211 20 C150 20 62 52 44 170 C42 200 40 236 40 262 C100 284 160 292 209 293 L209 20 Z" fill="url(#shell)" opacity="0.95"/>
+  <path d="M213 20 C272 20 360 52 378 170 C380 200 382 236 382 262 C322 284 262 292 213 293 L213 20 Z" fill="url(#shell)" opacity="0.95"/>
+  <path d="M40 263 C110 289 312 289 382 263" fill="none" stroke="#0a0a0c" stroke-width="3"/>
+  <path d="M211 20 L211 292" stroke="#0a0a0c" stroke-width="3"/>
+  <!-- ruedita -->
+  <rect x="192" y="74" width="38" height="98" rx="19" fill="#08080a"/>
+  <rect x="197" y="80" width="28" height="86" rx="14" fill="url(#wheel)"/>
+  <g stroke="#55555f" stroke-width="2" opacity="0.6">
+    <path d="M200 92 H222"/><path d="M200 104 H222"/><path d="M200 116 H222"/><path d="M200 128 H222"/><path d="M200 140 H222"/><path d="M200 152 H222"/>
+  </g>
+  <!-- botón de DPI -->
+  <rect x="199" y="196" width="24" height="38" rx="9" fill="#0e0e10" stroke="#3a3a42" stroke-width="2"/>
+  <!-- botones laterales (izquierda) -->
+  <path d="M27 286 C20 286 18 300 18 318 C18 338 20 350 27 350 L36 350 L36 286 Z" fill="#26262c" stroke="#4a4a52" stroke-width="2"/>
+  <path d="M25 362 C19 362 17 376 17 394 C17 414 19 426 25 426 L34 426 L34 362 Z" fill="#26262c" stroke="#4a4a52" stroke-width="2"/>
+  <!-- brillo -->
+  <path d="M211 16 C302 16 370 62 383 172 C395 282 404 420 398 540 C392 672 320 752 211 752 C102 752 30 672 24 540 C18 420 27 282 39 172 C52 62 120 16 211 16 Z"
+        fill="url(#sheen)"/>
+</svg>

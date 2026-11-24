@@ -1,6 +1,6 @@
 //! Nexo — núcleo de escritorio (Tauri 2).
 //!
-//! - HID: un hilo dueño del mouse (hid.rs); la UI y la bandeja le piden comandos.
+//! - HID: un hilo dueño del mouse (hid.rs, Motospeed X6 y RAWM); la UI y la bandeja le piden comandos.
 //! - Bandeja: ícono con el % de batería dibujado en runtime (tray_icon.rs).
 //! - Ventana: al cerrarla se destruye el WebView (la bandeja sigue viva con muy poca RAM);
 //!   se vuelve a crear al hacer clic en el ícono.
@@ -33,6 +33,7 @@ struct Shared {
     hid: hid::Hid,
     info: Mutex<Option<hid::DeviceInfo>>,
     battery: Mutex<Battery>,
+    last_io: Mutex<Instant>,
     poll_secs: AtomicU64,
     poll_now: AtomicBool,
     style: Mutex<tray_icon::Style>,
@@ -51,15 +52,28 @@ struct AppInfo {
 /* ───────────── Comandos para la UI ───────────── */
 
 #[tauri::command(async)]
-fn hid_open(state: State<Shared>) -> Result<hid::DeviceInfo, String> {
-    let info = state.hid.open()?;
+fn hid_open(state: State<Shared>, prefer: Option<String>) -> Result<hid::DeviceInfo, String> {
+    touch_io(&state);
+    let info = state.hid.open(prefer)?;
     *state.info.lock().unwrap() = Some(info.clone());
     Ok(info)
 }
 
 #[tauri::command(async)]
 fn hid_send(state: State<Shared>, report_id: u8, data: Vec<u8>) -> Result<(), String> {
+    touch_io(&state);
     state.hid.send(report_id, data)
+}
+
+#[tauri::command(async)]
+fn hid_read(state: State<Shared>, timeout_ms: u64) -> Result<Vec<Vec<u8>>, String> {
+    touch_io(&state);
+    state.hid.read(timeout_ms)
+}
+
+/// Marca actividad de la UI: el sondeo de batería RAWM espera para no mezclar respuestas.
+fn touch_io(state: &Shared) {
+    *state.last_io.lock().unwrap() = Instant::now();
 }
 
 #[tauri::command(async)]
@@ -70,6 +84,7 @@ fn hid_request(
     expect: u8,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, String> {
+    touch_io(&state);
     state.hid.request(report_id, data, expect, timeout_ms)
 }
 
@@ -112,24 +127,48 @@ fn state_request() -> Vec<u8> {
     d
 }
 
+fn family(shared: &Shared) -> Option<String> {
+    shared.info.lock().unwrap().as_ref().map(|i| i.family.clone())
+}
+
+fn poll_once(shared: &Shared) -> Result<Battery, String> {
+    let info = shared.info.lock().unwrap().clone();
+    match info.as_ref().map(|i| i.family.as_str()) {
+        Some("rawm") => {
+            let json = shared.hid.rawm_query(2500)?;
+            let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            let wired = v.get("wired").and_then(|x| x.as_u64()) == Some(1);
+            Ok(Battery {
+                connected: true,
+                level: v.get("battery").and_then(|x| x.as_u64()).map(|b| b.min(100) as u8),
+                charging: v.get("chr").and_then(|x| x.as_u64()) == Some(1),
+                cable: wired,
+            })
+        }
+        Some(_) => {
+            let data = shared.hid.request(0xB3, state_request(), hid::X6_REPORT_STATE, 1500)?;
+            if data.len() < 20 {
+                return Err("estado corto".into());
+            }
+            let raw = data[19];
+            let cable = info.map(|i| i.cable).unwrap_or(false);
+            Ok(Battery { connected: true, level: Some((raw & 0x7F).min(100)), charging: raw & 0x80 != 0, cable })
+        }
+        None => Err("sin dispositivo".into()),
+    }
+}
+
 fn poll_battery(app: &AppHandle) -> Battery {
     let shared = app.state::<Shared>();
-    let mut attempt = shared.hid.request(0xB3, state_request(), hid::REPORT_STATE, 1500);
+    let mut attempt = poll_once(&shared);
     if attempt.is_err() {
-        // puede que el dongle se haya reconectado: volver a enumerar y reintentar
-        if let Ok(info) = shared.hid.open() {
+        // puede que el receptor se haya reconectado: volver a enumerar y reintentar
+        if let Ok(info) = shared.hid.open(family(&shared)) {
             *shared.info.lock().unwrap() = Some(info);
-            attempt = shared.hid.request(0xB3, state_request(), hid::REPORT_STATE, 1500);
+            attempt = poll_once(&shared);
         }
     }
-    let cable = shared.info.lock().unwrap().as_ref().map(|i| i.cable).unwrap_or(false);
-    match attempt {
-        Ok(data) if data.len() >= 20 => {
-            let raw = data[19];
-            Battery { connected: true, level: Some((raw & 0x7F).min(100)), charging: raw & 0x80 != 0, cable }
-        }
-        _ => Battery::default(),
-    }
+    attempt.unwrap_or_default()
 }
 
 fn update_tray(app: &AppHandle, b: Battery, frame: u8) {
@@ -156,7 +195,8 @@ fn poll_loop(app: AppHandle) {
     loop {
         let shared = app.state::<Shared>();
         let every = Duration::from_secs(shared.poll_secs.load(Ordering::Relaxed));
-        if shared.poll_now.swap(false, Ordering::Relaxed) || last.elapsed() >= every {
+        let ui_busy = family(&shared).as_deref() == Some("rawm") && shared.last_io.lock().unwrap().elapsed() < Duration::from_secs(3);
+        if !ui_busy && (shared.poll_now.swap(false, Ordering::Relaxed) || last.elapsed() >= every) {
             last = Instant::now();
             let b = poll_battery(&app);
             *shared.battery.lock().unwrap() = b;
@@ -221,10 +261,11 @@ pub fn run() {
             hid: hid::Hid::spawn(),
             info: Mutex::new(None),
             battery: Mutex::new(Battery::default()),
+            last_io: Mutex::new(Instant::now() - Duration::from_secs(60)),
             poll_secs: AtomicU64::new(60),
             poll_now: AtomicBool::new(true),
             style: Mutex::new(tray_icon::Style::Bg),
-            name: Mutex::new("Motospeed X6".into()),
+            name: Mutex::new("Nexo".into()),
             portable,
             data_dir,
         })
@@ -232,6 +273,7 @@ pub fn run() {
             hid_open,
             hid_send,
             hid_request,
+            hid_read,
             app_info,
             battery_state,
             set_tray_prefs,

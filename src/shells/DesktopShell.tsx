@@ -120,7 +120,7 @@ function Taskbar() {
           <IconChevronUp size={15} />
         </TaskbarBtn>
         <div className="relative" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(params.tooltip)}>
-          <TaskbarBtn label="Batería del X6 (bandeja)" small active={flyoutOpen} onClick={() => setFlyout(!flyoutOpen)}>
+          <TaskbarBtn label="Batería del mouse (bandeja)" small active={flyoutOpen} onClick={() => setFlyout(!flyoutOpen)}>
             <TrayIcon size={16} state={{ level, charging: mouse.charging, cable, style: app.trayStyle, ink }} />
           </TaskbarBtn>
           <AnimatePresence>

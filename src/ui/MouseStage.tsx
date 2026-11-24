@@ -1,20 +1,31 @@
 import { AnimatePresence, motion } from "motion/react"
 import type { CSSProperties } from "react"
-import mouseUrl from "../assets/x6-top.webp"
 import type { ButtonId, LightState } from "../device/types"
-import { BUTTON_LABEL, BUTTON_ORDER } from "../device/types"
+import { BUTTON_LABEL } from "../device/types"
+import { useStore } from "../device/store"
 import { rgbToHex } from "../lib/util"
+import { mouseImageFor } from "./mouseImage"
 
 /** Relación de aspecto de la foto recortada (422×767). */
 export const MOUSE_ASPECT = 422 / 767
 
-/** Posición de cada botón sobre la foto (% del ancho / alto) y lado de su etiqueta. */
-const HOTSPOT: Record<ButtonId, { x: number; y: number; side: "l" | "r" }> = {
+type Spot = { x: number; y: number; side: "l" | "r" }
+/** Posición de cada botón sobre la foto del X6 (% del ancho / alto) y lado de su etiqueta. */
+const HOTSPOT_X6: Partial<Record<ButtonId, Spot>> = {
   left: { x: 27, y: 13, side: "l" },
   middle: { x: 50, y: 21, side: "r" },
   right: { x: 74, y: 33, side: "r" },
   side1: { x: 4.6, y: 34.5, side: "l" },
   side2: { x: 4.6, y: 51, side: "r" },
+}
+/** Lo mismo sobre la silueta genérica (mouses RAWM), con el botón de DPI. */
+const HOTSPOT_GENERIC: Partial<Record<ButtonId, Spot>> = {
+  left: { x: 28, y: 12, side: "l" },
+  middle: { x: 50, y: 15.5, side: "r" },
+  right: { x: 72, y: 26, side: "r" },
+  dpi: { x: 50, y: 28.5, side: "l" },
+  side1: { x: 5.5, y: 41.5, side: "l" },
+  side2: { x: 5.5, y: 51.5, side: "l" },
 }
 
 /** Margen lateral que necesita el escenario cuando muestra etiquetas. */
@@ -31,11 +42,15 @@ export function MouseStage({
   height: number
   light?: LightState
   /** si se pasan, se muestran hotspots + etiquetas (pantalla Botones) */
-  labels?: Record<ButtonId, string>
+  labels?: Partial<Record<ButtonId, string>>
   selected?: ButtonId
   onSelect?: (b: ButtonId) => void
   dim?: boolean
 }) {
+  const family = useStore((s) => s.caps.family)
+  const buttons = useStore((s) => s.caps.buttons)
+  const mouseUrl = mouseImageFor(family)
+  const HOTSPOT = family === "x6" ? HOTSPOT_X6 : HOTSPOT_GENERIC
   const imgH = Math.max(120, height)
   const imgW = imgH * MOUSE_ASPECT
   const side = labels ? LABEL_SPACE : 0
@@ -80,9 +95,7 @@ export function MouseStage({
                   : {
                       background: `radial-gradient(closest-side, ${color}, ${color}c0 50%, ${color}40 70%, transparent)`,
                       animation:
-                        light.mode === "breath"
-                          ? `glow-breathe ${1.4 + t * 4.6}s ease-in-out infinite`
-                          : undefined,
+                        light.mode === "breath" ? `glow-breathe ${1.4 + t * 4.6}s ease-in-out infinite` : undefined,
                     }
               }
             />
@@ -135,8 +148,9 @@ export function MouseStage({
 
         {/* Hotspots + etiquetas (estilo ATK) */}
         {labels &&
-          BUTTON_ORDER.map((b) => {
+          buttons.map((b) => {
             const p = HOTSPOT[b]
+            if (!p) return null
             const active = selected === b
             return (
               <div key={b}>
@@ -155,12 +169,10 @@ export function MouseStage({
                   onClick={() => onSelect?.(b)}
                   initial={{ opacity: 0, x: p.side === "l" ? 8 : -8 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: BUTTON_ORDER.indexOf(b) * 0.05 }}
+                  transition={{ delay: buttons.indexOf(b) * 0.05 }}
                   style={{
                     top: `calc(${p.y}% - 22px)`,
-                    ...(p.side === "l"
-                      ? { right: `calc(${100 - p.x}% + 20px)` }
-                      : { left: `calc(${p.x}% + 20px)` }),
+                    ...(p.side === "l" ? { right: `calc(${100 - p.x}% + 20px)` } : { left: `calc(${p.x}% + 20px)` }),
                   }}
                 >
                   <small>{BUTTON_LABEL[b]}</small>

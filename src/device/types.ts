@@ -1,10 +1,10 @@
-// Modelo del estado del Motospeed X6.
-// Los campos siguen el reporte de configuración 0xB4 y los comandos 0xB5/0xB3
-// documentados en el repo original (jchu634/X6-Utilities, MIT).
+// Modelo del estado del mouse, común a todas las familias (Motospeed X6, RAWM…).
+// Cada driver (src/devices/) traduce entre este estado y su protocolo, y declara en
+// `Capabilities` qué partes soporta: la interfaz muestra solo eso.
 
-export type LightMode = "off" | "static" | "breath" | "rainbow"
+export type LightMode = "off" | "static" | "breath" | "rainbow" | "dpi"
 export type RGB = { r: number; g: number; b: number }
-export type ButtonId = "left" | "right" | "middle" | "side1" | "side2"
+export type ButtonId = "left" | "right" | "middle" | "side1" | "side2" | "dpi"
 export type Connection = "dongle" | "cable"
 
 export interface LightState {
@@ -14,6 +14,8 @@ export interface LightState {
   brightness: number
   /** 1–255 */
   speed: number
+  /** Apagar la luz cuando el mouse está en reposo (RAWM). */
+  autoOff?: boolean
 }
 
 export interface MouseState {
@@ -21,36 +23,78 @@ export interface MouseState {
   battery: number
   charging: boolean
   connection: Connection
-  /** 5 slots, 100–26000 */
+  /** valores de los niveles (la cantidad la define caps.dpi.slots) */
   dpi: number[]
-  /** slot activo, 0–4 */
+  /** slot activo */
   dpiSlot: number
-  /** cantidad de slots activos, 1–5 */
+  /** cantidad de slots activos */
   dpiCount: number
-  /** índice en POLLING_RATES */
+  /** índice en caps.polling */
   pollingIndex: number
   liftOff: "low" | "high"
   motionSync: boolean
   angleSnap: boolean
   ripple: boolean
+  /** X6: modo eSports */
   esports: boolean
+  /** RAWM: índice en caps.powerModes */
+  powerMode: number
   scrollForward: boolean
-  /** 0–20 ms */
+  /** ms */
   debounceMs: number
-  /** 1–60 min */
-  sleepMin: number
+  /** segundos */
+  sleepSec: number
   light: LightState
   /** id de acción (ver actions.ts) por botón */
   remaps: Record<ButtonId, string>
 }
 
-export const POLLING_RATES = [125, 500, 1000, 2000, 4000, 8000] as const
-export const DPI_MIN = 100
-export const DPI_MAX = 26000
-export const DPI_STEP = 100
+export interface PowerModeInfo {
+  label: string
+  desc: string
+}
 
-/** Id de tecla que usa el comando de remapeo 0x52 */
-export const BUTTON_KEY_ID: Record<ButtonId, number> = {
+/** Qué soporta el mouse conectado. La UI se arma con esto. */
+export interface Capabilities {
+  /** id de familia del driver */
+  family: "x6" | "rawm"
+  /** nombre corto para textos ("el X6", "el ES21") */
+  shortName: string
+  dpi: { min: number; max: number; step: number; slots: number }
+  /** Hz disponibles; pollingIndex apunta acá */
+  polling: number[]
+  lod: boolean
+  motionSync: boolean
+  angleSnap: boolean
+  ripple: boolean
+  scrollDirection: boolean
+  /** X6: interruptor básico / eSports */
+  esports: boolean
+  /** RAWM: modos de energía */
+  powerModes: PowerModeInfo[]
+  /** opciones de debounce en ms (vacío = no soportado) */
+  debounce: number[]
+  /** opciones de suspensión en segundos (vacío = no soportado) */
+  sleep: number[]
+  light: {
+    modes: LightMode[]
+    /** "rgb" = cualquier color; "rgb3" = solo 7 colores (un bit por canal) */
+    palette: "rgb" | "rgb3"
+    speed: boolean
+    brightness: boolean
+    autoOff: boolean
+    /** el mouse informa su luz actual */
+    readable: boolean
+  } | null
+  remap: boolean
+  /** botones remapeables, en orden */
+  buttons: ButtonId[]
+  /** el mouse informa la batería al leer el estado */
+  battery: boolean
+}
+
+/** Id de tecla que usa el comando de remapeo 0x52 del X6 */
+export const BUTTON_KEY_ID: Partial<Record<ButtonId, number>> = {
   left: 0x00,
   right: 0x01,
   middle: 0x02,
@@ -64,6 +108,7 @@ export const BUTTON_LABEL: Record<ButtonId, string> = {
   middle: "Ruedita",
   side1: "Lateral delantero",
   side2: "Lateral trasero",
+  dpi: "Botón de DPI",
 }
 
-export const BUTTON_ORDER: ButtonId[] = ["left", "right", "middle", "side1", "side2"]
+export const BUTTON_ORDER: ButtonId[] = ["left", "right", "middle", "side1", "side2", "dpi"]

@@ -1,10 +1,10 @@
 import { AnimatePresence, motion } from "motion/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ACTION_BY_ID, actionsIn, type ActionCategory } from "../device/actions"
 import { useStore } from "../device/store"
-import { BUTTON_LABEL, BUTTON_ORDER, type ButtonId } from "../device/types"
+import { BUTTON_LABEL, type ButtonId } from "../device/types"
 import { Button, Card, OptionButton, Segmented } from "../ui/controls"
-import { IconBan, IconHand, IconUndo } from "../ui/icons"
+import { IconBan, IconHand, IconInfo, IconUndo } from "../ui/icons"
 import { MouseBox } from "../ui/MouseBox"
 import { fitMouse, MouseStage } from "../ui/MouseStage"
 
@@ -22,14 +22,32 @@ export function ButtonsPage() {
   const selectButton = useStore((s) => s.selectButton)
   const setRemap = useStore((s) => s.setRemap)
   const resetRemaps = useStore((s) => s.resetRemaps)
+  const caps = useStore((s) => s.caps)
   const current = ACTION_BY_ID[mouse.remaps[selected]]
   const [category, setCategory] = useState<ActionCategory>(
     current && current.category !== "other" ? current.category : "mouse",
   )
 
   const labels = Object.fromEntries(
-    BUTTON_ORDER.map((b) => [b, ACTION_BY_ID[mouse.remaps[b]]?.label ?? "—"]),
-  ) as Record<ButtonId, string>
+    caps.buttons.map((b) => [b, ACTION_BY_ID[mouse.remaps[b]]?.label ?? "—"]),
+  ) as Partial<Record<ButtonId, string>>
+
+  if (!caps.remap || !caps.buttons.includes(selected))
+    return !caps.remap ? (
+      <div className="grid h-full grid-cols-[1fr_360px] gap-5">
+        <MouseBox className="flex-1" render={(box) => <MouseStage height={fitMouse(box, true, 560)} />} />
+        <Card icon={IconHand} title="Botones" className="h-full">
+          <div className="flex gap-3">
+            <IconInfo size={18} className="mt-0.5 shrink-0 text-[var(--fg-2)]" />
+            <p className="text-[13px] leading-relaxed text-[var(--fg-2)]">
+              El {caps.shortName} no permite reasignar botones desde Nexo. El resto de los ajustes funciona normalmente.
+            </p>
+          </div>
+        </Card>
+      </div>
+    ) : (
+      <ResetSelection onMount={() => selectButton(caps.buttons[0])} />
+    )
 
   return (
     <div className="grid h-full grid-cols-[1fr_360px] gap-5">
@@ -70,7 +88,7 @@ export function ButtonsPage() {
           ariaLabel="Categoría"
           value={category}
           onChange={setCategory}
-          options={CATEGORIES}
+          options={CATEGORIES.filter((c) => actionsIn(c.value, caps.family).length > 0)}
           className="mb-3"
         />
         <AnimatePresence mode="wait" initial={false}>
@@ -82,7 +100,7 @@ export function ButtonsPage() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.15 }}
           >
-            {actionsIn(category).map((a) => (
+            {actionsIn(category, caps.family).map((a) => (
               <OptionButton
                 key={a.id}
                 variant="mode"
@@ -110,4 +128,10 @@ export function ButtonsPage() {
       </Card>
     </div>
   )
+}
+
+/** Si el botón elegido no existe en este mouse (p. ej. "DPI" al pasar al X6), vuelve al primero. */
+function ResetSelection({ onMount }: { onMount: () => void }) {
+  useEffect(onMount, [onMount])
+  return null
 }

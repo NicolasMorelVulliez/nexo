@@ -1,6 +1,5 @@
 import { AnimatePresence, motion } from "motion/react"
 import { useStore } from "../device/store"
-import { POLLING_RATES } from "../device/types"
 import { Card, OptionButton, Segmented } from "../ui/controls"
 import { AnimatedNumber, BatteryBar } from "../ui/display"
 import { IconBattery, IconGauge, IconSignal } from "../ui/icons"
@@ -12,7 +11,11 @@ const hzLabel = (r: number) => (r >= 1000 ? `${r / 1000}K` : String(r))
 export function PerformancePage() {
   const mouse = useStore((s) => s.mouse)
   const update = useStore((s) => s.update)
+  const caps = useStore((s) => s.caps)
+  const rates = caps.polling
+  const rate = rates[mouse.pollingIndex] ?? rates[rates.length - 1]
   const cable = mouse.connection === "cable"
+  const power = caps.powerModes[mouse.powerMode]
 
   return (
     <StageLayout
@@ -24,13 +27,15 @@ export function PerformancePage() {
             size="lg"
             value={mouse.pollingIndex}
             onChange={(i) => update({ pollingIndex: i })}
-            options={POLLING_RATES.map((r, i) => ({ value: i, label: hzLabel(r) }))}
+            options={rates.map((r, i) => ({ value: i, label: hzLabel(r) }))}
           />
           <div className="mt-2.5 flex justify-between text-[12.5px] text-[var(--fg-3)]">
             <span>Uso diario</span>
             <span className="tnum">
-              {(1000 / POLLING_RATES[mouse.pollingIndex]).toLocaleString("es-AR", { maximumFractionDigits: 3 })} ms
-              de intervalo
+              {(1000 / rate).toLocaleString("es-AR", {
+                maximumFractionDigits: 3,
+              })}{" "}
+              ms de intervalo
             </span>
             <span>Competitivo</span>
           </div>
@@ -58,40 +63,70 @@ export function PerformancePage() {
             </div>
             <div className="mt-2 flex gap-4 text-[13px] text-[var(--fg-2)]">
               <span>{mouse.charging ? "Cargando" : "En uso"}</span>
-              <span>{cable ? "Cable USB" : "Dongle 2.4 GHz"}</span>
+              <span>{cable ? "Cable USB" : caps.family === "x6" ? "Dongle 2.4 GHz" : "Receptor 2.4 GHz"}</span>
             </div>
             <p className="card-desc">
-              Más polling rate y el modo eSports consumen más batería. El nivel se consulta
-              periódicamente desde el dongle.
+              Más polling rate y {caps.esports ? "el modo eSports consumen" : "un modo de energía más alto consumen"}{" "}
+              más batería. El nivel se consulta periódicamente.
             </p>
             <div className="mt-4">
               <BatteryBar level={cable ? 100 : mouse.battery} charging={mouse.charging} />
             </div>
           </Card>
 
-          <Card icon={IconGauge} title="Modo de rendimiento">
-            <div className="flex flex-col gap-2.5">
-              <OptionButton group="perf-mode" pressed={!mouse.esports} onClick={() => update({ esports: false })}>
-                <span>Modo básico</span>
-              </OptionButton>
-              <OptionButton group="perf-mode" pressed={mouse.esports} onClick={() => update({ esports: true })}>
-                <span>Modo eSports</span>
-              </OptionButton>
-            </div>
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.p
-                key={String(mouse.esports)}
-                className="card-desc mt-3"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-              >
-                {mouse.esports
-                  ? "El sensor trabaja a máxima respuesta y menor latencia. Ideal para jugar; reduce la autonomía."
-                  : "El sensor trabaja en un estado de bajo consumo: mayor autonomía, ideal para el uso diario."}
-              </motion.p>
-            </AnimatePresence>
-          </Card>
+          {caps.powerModes.length > 0 && (
+            <Card icon={IconGauge} title="Modo de energía">
+              <div className="flex flex-col gap-2.5">
+                {caps.powerModes.map((p, i) => (
+                  <OptionButton
+                    key={p.label}
+                    group="power-mode"
+                    pressed={mouse.powerMode === i}
+                    onClick={() => update({ powerMode: i })}
+                  >
+                    <span>{p.label}</span>
+                  </OptionButton>
+                ))}
+              </div>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.p
+                  key={mouse.powerMode}
+                  className="card-desc mt-3"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {power?.desc}
+                </motion.p>
+              </AnimatePresence>
+            </Card>
+          )}
+
+          {caps.esports && (
+            <Card icon={IconGauge} title="Modo de rendimiento">
+              <div className="flex flex-col gap-2.5">
+                <OptionButton group="perf-mode" pressed={!mouse.esports} onClick={() => update({ esports: false })}>
+                  <span>Modo básico</span>
+                </OptionButton>
+                <OptionButton group="perf-mode" pressed={mouse.esports} onClick={() => update({ esports: true })}>
+                  <span>Modo eSports</span>
+                </OptionButton>
+              </div>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.p
+                  key={String(mouse.esports)}
+                  className="card-desc mt-3"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {mouse.esports
+                    ? "El sensor trabaja a máxima respuesta y menor latencia. Ideal para jugar; reduce la autonomía."
+                    : "El sensor trabaja en un estado de bajo consumo: mayor autonomía, ideal para el uso diario."}
+                </motion.p>
+              </AnimatePresence>
+            </Card>
+          )}
         </>
       }
     />

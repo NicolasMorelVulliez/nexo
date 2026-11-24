@@ -1,6 +1,5 @@
 import { motion } from "motion/react"
 import { useStore } from "../device/store"
-import { DPI_MAX, DPI_MIN, DPI_STEP } from "../device/types"
 import { SPRING } from "../lib/util"
 import { Button, Card, Segmented, Slider, Stepper } from "../ui/controls"
 import { AnimatedNumber } from "../ui/display"
@@ -8,16 +7,20 @@ import { IconTarget } from "../ui/icons"
 import { StageLayout } from "./StageLayout"
 
 const fmt = (v: number) => Math.round(v).toLocaleString("es-AR")
-const PRESETS = [400, 800, 1600, 3200, 6400]
+const PRESETS = [400, 800, 1600, 3200, 6400, 12800]
 /** Color de cada nivel (como los indicadores de DPI de los mouse gamer). */
-const LEVEL_COLORS = ["#ff4d4f", "#3d6bd6", "#2fcb64", "#f5b334", "#b05cff"]
+const LEVEL_COLORS = ["#ff4d4f", "#3d6bd6", "#2fcb64", "#f5b334", "#b05cff", "#00c7be", "#ff8fab", "#ffffff"]
 
 export function DpiPage() {
   const mouse = useStore((s) => s.mouse)
   const update = useStore((s) => s.update)
   const setDpiValue = useStore((s) => s.setDpiValue)
-  const { dpi, dpiSlot, dpiCount } = mouse
-  const current = dpi[dpiSlot]
+  const { min, max, step, slots } = useStore((s) => s.caps.dpi)
+  const { dpiSlot, dpiCount } = mouse
+  const dpi = mouse.dpi.slice(0, slots)
+  const current = dpi[dpiSlot] ?? dpi[0]
+  const marks = [0.2, 0.4, 0.6, 0.8].map((f) => Math.round((max * f) / 1000) * 1000)
+  const presets = PRESETS.filter((p) => p >= min && p <= max).slice(0, 6)
 
   return (
     <StageLayout
@@ -29,7 +32,7 @@ export function DpiPage() {
           desc="Elegí un nivel y ajustá su valor. El botón de DPI del mouse recorre los niveles activos."
           className="shrink-0"
         >
-          <div className="grid grid-cols-5 gap-2.5">
+          <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${slots}, minmax(0, 1fr))` }}>
             {dpi.map((v, i) => {
               const active = i === dpiSlot
               const enabled = i < dpiCount
@@ -49,11 +52,21 @@ export function DpiPage() {
                       transition={SPRING}
                     />
                   )}
-                  <span className="relative flex w-full items-center justify-between text-[12px]" style={{ color: active ? "var(--on-primary)" : "var(--fg-3)" }}>
+                  <span
+                    className="relative flex w-full items-center justify-between text-[12px]"
+                    style={{
+                      color: active ? "var(--on-primary)" : "var(--fg-3)",
+                    }}
+                  >
                     Nivel {i + 1}
                     <span className="h-2 w-2 rounded-full" style={{ background: LEVEL_COLORS[i] }} />
                   </span>
-                  <span className="num relative text-[24px] leading-none" style={{ color: active ? "var(--on-primary)" : "var(--fg)" }}>
+                  <span
+                    className={`num relative leading-none ${slots > 5 ? "text-[20px]" : "text-[24px]"}`}
+                    style={{
+                      color: active ? "var(--on-primary)" : "var(--fg)",
+                    }}
+                  >
                     {fmt(v)}
                   </span>
                 </button>
@@ -64,19 +77,19 @@ export function DpiPage() {
             <Slider
               ariaLabel="DPI del nivel"
               value={current}
-              min={DPI_MIN}
-              max={DPI_MAX}
-              step={DPI_STEP}
-              marks={[5000, 10000, 15000, 20000]}
+              min={min}
+              max={max}
+              step={step}
+              marks={marks}
               onChange={(v) => setDpiValue(dpiSlot, v)}
               className="flex-1"
             />
             <Stepper
               ariaLabel="DPI"
               value={current}
-              min={DPI_MIN}
-              max={DPI_MAX}
-              step={DPI_STEP}
+              min={min}
+              max={max}
+              step={step}
               onChange={(v) => setDpiValue(dpiSlot, v)}
               format={fmt}
             />
@@ -102,13 +115,13 @@ export function DpiPage() {
               ariaLabel="Niveles activos"
               value={dpiCount}
               onChange={(n) => update({ dpiCount: n, dpiSlot: Math.min(dpiSlot, n - 1) })}
-              options={[1, 2, 3, 4, 5].map((n) => ({ value: n, label: String(n) }))}
+              options={Array.from({ length: slots }, (_, i) => i + 1).map((n) => ({ value: n, label: String(n) }))}
             />
           </Card>
 
           <Card title="Valores rápidos" desc={`Aplicar al nivel ${dpiSlot + 1}.`}>
             <div className="grid grid-cols-3 gap-2">
-              {PRESETS.map((p) => (
+              {presets.map((p) => (
                 <Button
                   key={p}
                   size="sm"

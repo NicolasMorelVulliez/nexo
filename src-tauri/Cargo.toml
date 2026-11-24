@@ -1,7 +1,7 @@
 [package]
 name = "nexo"
-version = "0.1.0"
-description = "Nexo — configurador del mouse Motospeed X6"
+version = "0.2.0"
+description = "Nexo — configurador de mouses (Motospeed X6, RAWM)"
 edition = "2021"
 
 [lib]

@@ -265,7 +265,7 @@ function FontSample({ big }: { big?: boolean }) {
   return (
     <div className="grid place-items-center rounded-[10px] bg-[var(--surface-2)] py-5 text-center">
       <div className={cn("font-bold uppercase tracking-tight", big ? "text-[26px]" : "text-[22px]")}>Todo para jugar</div>
-      <div className="text-[14px] text-[var(--fg-2)]">Hecho para tu X6 · 0123456789</div>
+      <div className="text-[14px] text-[var(--fg-2)]">Hecho para tu mouse · 0123456789</div>
     </div>
   )
 }
@@ -615,6 +615,7 @@ function GeneralPage() {
   }
   const desktop = s.shell === "desktop"
   const cable = s.mouse.connection === "cable"
+  const wireless = s.caps.family === "x6" ? "Dongle 2.4 GHz" : "Receptor 2.4 GHz"
   const gallery: { label: string; st: Omit<TrayIconState, "style"> }[] = [
     { label: "100%", st: { level: 100, charging: false, cable: false } },
     { label: "78%", st: { level: 78, charging: false, cable: false } },
@@ -622,7 +623,7 @@ function GeneralPage() {
     { label: "12%", st: { level: 12, charging: false, cable: false } },
     { label: "Carga", st: { level: 64, charging: true, cable: false } },
     { label: "Cable", st: { level: null, charging: false, cable: true } },
-    { label: "Sin X6", st: { level: null, charging: false, cable: false } },
+    { label: "Sin mouse", st: { level: null, charging: false, cable: false } },
   ]
   return (
     <>
@@ -693,7 +694,7 @@ function GeneralPage() {
               <Toggle label="Reducir animaciones" checked={app.reduceMotion} onChange={(v) => s.setApp({ reduceMotion: v })} />
             </SettingRow>
             <SettingRow label="Estado del dispositivo">
-              <span className="text-[13px] text-[var(--fg-2)]">{cable ? "Cable USB" : "Dongle 2.4 GHz"}</span>
+              <span className="text-[13px] text-[var(--fg-2)]">{cable ? "Cable USB" : wireless}</span>
             </SettingRow>
           </Card>
         </div>
@@ -704,11 +705,14 @@ function GeneralPage() {
 
 /* ───────────── Acerca de ───────────── */
 
+const hex4 = (n: number) => n.toString(16).toUpperCase().padStart(4, "0")
+
 function AboutPage() {
   const s = useStore()
   const name = useDeviceName()
   const desktop = s.shell === "desktop"
   const cable = s.mouse.connection === "cable"
+  const wireless = s.caps.family === "x6" ? "Dongle 2.4 GHz" : "Receptor 2.4 GHz"
   return (
     <>
       <PageHeader eyebrow="Aplicación" title="Acerca de" desc="Versión, dispositivo y créditos." />
@@ -721,7 +725,7 @@ function AboutPage() {
             <div>
               <div className="text-[24px] font-bold">Nexo</div>
               <div className="text-[13.5px] text-[var(--fg-2)]">
-                Versión 0.1.0 · {desktop ? (s.app.installMode === "installed" ? "Instalada" : "Portable") : "Web"}
+                Versión 0.2.0 · {desktop ? (s.app.installMode === "installed" ? "Instalada" : "Portable") : "Web"}
               </div>
             </div>
           </div>
@@ -734,7 +738,9 @@ function AboutPage() {
           <SettingRow
             label="Modelo"
             desc={
-              s.identity.source === "cable"
+              s.identity.source === "firmware"
+                ? "Informado por el mouse"
+                : s.identity.source === "cable"
                 ? "Leído del mouse (cable USB)"
                 : s.identity.source === "recordado"
                   ? "Guardado · podés corregirlo"
@@ -743,6 +749,7 @@ function AboutPage() {
           >
             <input
               aria-label="Nombre del modelo"
+              readOnly={s.identity.source === "firmware"}
               className="field w-[190px] text-left"
               defaultValue={name}
               key={name}
@@ -756,16 +763,17 @@ function AboutPage() {
             />
           </SettingRow>
           <SettingRow label="USB">
-            <span className="tnum text-[var(--fg-2)]">0BDA:{cable ? "FFF1" : "FFE0"}</span>
+            <span className="tnum text-[var(--fg-2)]">{hex4(s.identity.vid)}:{hex4(s.identity.pid)}</span>
           </SettingRow>
           <SettingRow label="Conexión">
-            <span className="text-[var(--fg-2)]">{cable ? "Cable USB" : "Dongle 2.4 GHz"}</span>
+            <span className="text-[var(--fg-2)]">{cable ? "Cable USB" : wireless}</span>
           </SettingRow>
         </Card>
         <Card title="Créditos" className="col-span-2">
           <p className="text-[13px] leading-relaxed text-[var(--fg-2)]">
-            Protocolo basado en X6-Utilities de jchu634 (MIT) y la documentación de keshuac.com (CC BY 4.0). Números en
-            D-DIN (Datto, SIL OFL 1.1). Proyecto no oficial, sin relación con Motospeed ni ATK.
+            Protocolo del X6 basado en X6-Utilities de jchu634 (MIT) y la documentación de keshuac.com (CC BY 4.0).
+            Protocolo RAWM obtenido por ingeniería inversa del configurador web oficial, por interoperabilidad. Números en
+            D-DIN (Datto, SIL OFL 1.1). Proyecto no oficial, sin relación con Motospeed, RAWM ni ATK.
           </p>
         </Card>
       </div>

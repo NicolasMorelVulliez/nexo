@@ -1,9 +1,9 @@
 import { motion } from "motion/react"
-import mouseUrl from "../assets/x6-top.webp"
 import { useDeviceName, useStore } from "../device/store"
 import { Button } from "../ui/controls"
 import { BatteryReadout } from "../ui/display"
 import { IconBulb, IconHand, IconPlus, IconSignal, IconSliders, IconPlug } from "../ui/icons"
+import { mouseImageFor } from "../ui/mouseImage"
 
 /**
  * Inicio: mezcla de G Hub (mouse protagonista + batería debajo) y ATK (tarjeta del
@@ -14,6 +14,8 @@ export function HomePage() {
   const name = useDeviceName()
   const { battery, charging, connection } = s.mouse
   const desktop = s.shell === "desktop"
+  const mouseUrl = mouseImageFor(s.caps.family)
+  const wireless = s.caps.family === "x6" ? "Dongle 2.4 GHz" : "Receptor 2.4 GHz"
 
   return (
     <div className="relative flex h-full flex-col items-center justify-center overflow-hidden pb-6">
@@ -69,7 +71,7 @@ export function HomePage() {
             <span className="flex items-center gap-3 text-[13.5px] text-[var(--fg-2)]">
               <IconSignal size={16} />
               <span className="h-3.5 w-px bg-[var(--border-2)]" />
-              {s.connected ? (connection === "dongle" ? "Dongle 2.4 GHz" : "Cable USB") : "Desconectado"}
+              {s.connected ? (connection === "dongle" ? wireless : "Cable USB") : "Desconectado"}
             </span>
             {s.connected && (
               <span className="ml-auto flex items-center gap-1">
@@ -99,14 +101,15 @@ export function HomePage() {
             <IconPlug size={16} /> Conectar mouse
           </Button>
         ) : (
-          <Button variant="primary" onClick={s.connected ? undefined : s.connect}>
-            <IconPlus size={15} /> Agregar dispositivo
+          <Button variant="primary" onClick={s.connected ? s.addDevice : s.connect}>
+            <IconPlus size={15} />{" "}
+            {s.connected ? (desktop ? "Cambiar de mouse" : "Agregar dispositivo") : "Agregar dispositivo"}
           </Button>
         )}
         <p className="text-[14px] text-[var(--fg-2)]">
           {desktop
-            ? "Conectá el dongle 2.4 GHz o el cable USB: Nexo lo detecta solo."
-            : "Conectá el dongle 2.4 GHz o el cable USB. Requiere Chrome o Edge."}
+            ? "Conectá el receptor 2.4 GHz o el cable USB: Nexo lo detecta solo. Compatible con Motospeed X6 y mouses RAWM."
+            : "Conectá el receptor 2.4 GHz o el cable USB. Requiere Chrome o Edge. Compatible con Motospeed X6 y mouses RAWM."}
         </p>
       </motion.div>
     </div>
