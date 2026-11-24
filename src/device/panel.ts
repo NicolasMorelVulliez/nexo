@@ -11,6 +11,12 @@ import type { MouseState } from "./types"
 
 let mirror = false
 
+/** Elige qué mouse se ajusta desde el panel. */
+export function panelSelect(id: string) {
+  useStore.getState().selectDevice(id)
+  if (mirror) void import("@tauri-apps/api/event").then(({ emitTo }) => emitTo("main", "panel-select", id))
+}
+
 /** Aplica un cambio desde el panel. */
 export function panelUpdate(patch: Partial<MouseState>) {
   useStore.getState().update(patch)
@@ -25,9 +31,8 @@ export async function startPanel() {
     startLive({ panel: true })
     return
   }
-  listen<Pick<ReturnType<typeof useStore.getState>, "mouse" | "caps" | "identity" | "connected">>("panel-state", ({ payload }) =>
-    useStore.setState({ ...payload, status: payload.connected ? "ready" : "idle" }),
-  )
+  type Snap = Pick<ReturnType<typeof useStore.getState>, "mouse" | "caps" | "identity" | "connected" | "devices" | "activeId">
+  listen<Snap>("panel-state", ({ payload }) => useStore.setState({ ...payload, status: payload.connected ? "ready" : "idle" }))
   emitTo("main", "panel-hello", null)
 }
 
@@ -36,13 +41,21 @@ export async function servePanel() {
   const { listen, emitTo } = await import("@tauri-apps/api/event")
   const send = () => {
     const s = useStore.getState()
-    emitTo("panel", "panel-state", { mouse: s.mouse, caps: s.caps, identity: s.identity, connected: s.connected }).catch(() => {})
+    emitTo("panel", "panel-state", {
+      mouse: s.mouse,
+      caps: s.caps,
+      identity: s.identity,
+      connected: s.connected,
+      devices: s.devices,
+      activeId: s.activeId,
+    }).catch(() => {})
   }
   listen("panel-hello", send)
   listen<Partial<MouseState>>("panel-patch", ({ payload }) => {
     if (useStore.getState().connected) useStore.getState().update(payload)
   })
+  listen<string>("panel-select", ({ payload }) => useStore.getState().selectDevice(payload))
   useStore.subscribe((s, prev) => {
-    if (s.mouse !== prev.mouse || s.caps !== prev.caps || s.identity !== prev.identity || s.connected !== prev.connected) send()
+    if (s.mouse !== prev.mouse || s.devices !== prev.devices || s.activeId !== prev.activeId || s.connected !== prev.connected) send()
   })
 }

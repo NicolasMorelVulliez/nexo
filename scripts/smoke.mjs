@@ -130,10 +130,27 @@ try {
   await page.goto(`${BASE}/?mockup=1&device=es21&view=acerca`, { waitUntil: "networkidle0" })
   check("ES21: VID:PID real en Acerca de", await bodyHas("1915:233C"))
 
+  // 12) Dos mouses a la vez: tarjetas en Inicio y una pestaña por mouse
+  await page.setViewport({ width: 1440, height: 900 })
+  await page.goto(`${BASE}/?mockup=1`, { waitUntil: "networkidle0" })
+  check("Inicio: tarjetas del X6 y del ES21", (await bodyHas("Motospeed X6 Max")) && (await bodyHas("RAWM ES21")))
+  await page.click('button[aria-label="Abrir configuración del RAWM ES21"]')
+  await wait(500)
+  await clickText("nav button", "Rendimiento")
+  check("pestaña ES21: modos de energía", await bodyHas("Modo de energía"))
+  await clickText("header button", "Inicio")
+  await page.click('button[aria-label="Abrir configuración del Motospeed X6 Max"]')
+  await wait(500)
+  await clickText("nav button", "Rendimiento")
+  check("pestaña X6: modo eSports", await bodyHas("Modo eSports"))
+  const tabs = await page.evaluate(() => [...document.querySelectorAll("header")].map((h) => h.textContent).join(" "))
+  check("dos pestañas de mouse abiertas", tabs.includes("RAWM ES21") && tabs.includes("Motospeed X6 Max"))
+
   // 11) Panel rápido de la bandeja
   await page.setViewport({ width: 360, height: 480 })
   await page.goto(`${BASE}/?mockup=1&panel=1&device=es21`, { waitUntil: "networkidle0" })
   check("panel: DPI, polling y modo", (await bodyHas("Polling rate")) && (await bodyHas("Alto rendimiento")) && (await bodyHas("Abrir Nexo")))
+  check("panel: selector de mouse", (await bodyHas("ES21 · 64%")) && (await bodyHas("X6 Max")))
 
   check(`sin errores en consola (${errors.length})`, errors.length === 0)
   if (errors.length) console.log(errors.join("\n"))

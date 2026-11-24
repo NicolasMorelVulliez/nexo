@@ -8,10 +8,11 @@
 
 use hidapi::{HidApi, HidDevice};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Family {
     X6,
     Rawm,
@@ -22,6 +23,14 @@ impl Family {
         match self {
             Family::X6 => "x6",
             Family::Rawm => "rawm",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Family, String> {
+        match s {
+            "x6" => Ok(Family::X6),
+            "rawm" => Ok(Family::Rawm),
+            _ => Err(format!("familia desconocida: {s}")),
         }
     }
 }
@@ -71,10 +80,10 @@ pub struct DeviceInfo {
 type Reply<T> = Sender<Result<T, String>>;
 
 enum Cmd {
-    Open(Option<String>, Reply<DeviceInfo>),
-    Send(u8, Vec<u8>, Reply<()>),
-    Request(u8, Vec<u8>, u8, u64, Reply<Vec<u8>>),
-    Read(u64, Reply<Vec<Vec<u8>>>),
+    OpenAll(Reply<Vec<DeviceInfo>>),
+    Send(Family, u8, Vec<u8>, Reply<()>),
+    Request(Family, u8, Vec<u8>, u8, u64, Reply<Vec<u8>>),
+    Read(Family, u64, Reply<Vec<Vec<u8>>>),
     RawmQuery(u64, Reply<String>),
 }
 
@@ -99,22 +108,23 @@ impl Hid {
         r.recv().map_err(|e| e.to_string())?
     }
 
-    /// Abre el primer mouse soportado (o el de la familia preferida si hay varios).
-    pub fn open(&self, prefer: Option<String>) -> Result<DeviceInfo, String> {
-        self.call(|r| Cmd::Open(prefer, r))
+    /// Vuelve a enumerar y abre todos los mouses soportados (uno por familia). Los que ya estaban
+    /// abiertos y siguen conectados se conservan.
+    pub fn open_all(&self) -> Result<Vec<DeviceInfo>, String> {
+        self.call(Cmd::OpenAll)
     }
 
-    pub fn send(&self, report_id: u8, data: Vec<u8>) -> Result<(), String> {
-        self.call(|r| Cmd::Send(report_id, data, r))
+    pub fn send(&self, family: Family, report_id: u8, data: Vec<u8>) -> Result<(), String> {
+        self.call(|r| Cmd::Send(family, report_id, data, r))
     }
 
-    pub fn request(&self, report_id: u8, data: Vec<u8>, expect: u8, timeout_ms: u64) -> Result<Vec<u8>, String> {
-        self.call(|r| Cmd::Request(report_id, data, expect, timeout_ms.min(5000), r))
+    pub fn request(&self, family: Family, report_id: u8, data: Vec<u8>, expect: u8, timeout_ms: u64) -> Result<Vec<u8>, String> {
+        self.call(|r| Cmd::Request(family, report_id, data, expect, timeout_ms.min(5000), r))
     }
 
     /// Reportes de entrada desde la última lectura/envío (sin repetidos seguidos).
-    pub fn read(&self, timeout_ms: u64) -> Result<Vec<Vec<u8>>, String> {
-        self.call(|r| Cmd::Read(timeout_ms.min(5000), r))
+    pub fn read(&self, family: Family, timeout_ms: u64) -> Result<Vec<Vec<u8>>, String> {
+        self.call(|r| Cmd::Read(family, timeout_ms.min(5000), r))
     }
 
     /// RAWM: pide el estado (CMD_QUERY) y devuelve el JSON. Atómico respecto de la UI.
@@ -132,59 +142,52 @@ struct Open {
 
 fn worker(rx: Receiver<Cmd>) {
     let mut api: Option<HidApi> = None;
-    let mut cur: Option<Open> = None;
-    let mut prefer: Option<String> = None;
+    // un dispositivo abierto por familia (X6 y RAWM pueden estar a la vez)
+    let mut open: HashMap<Family, Open> = HashMap::new();
 
     for cmd in rx {
         match cmd {
-            Cmd::Open(p, reply) => {
-                cur = None; // volver a enumerar siempre
-                if p.is_some() {
-                    prefer = p;
-                }
-                let r = ensure(&mut api, &mut cur, prefer.as_deref()).map(|o| o.info.clone());
+            Cmd::OpenAll(reply) => {
+                let r = open_all(&mut api, &mut open);
                 let _ = reply.send(r);
             }
-            Cmd::Send(id, data, reply) => {
-                let r = ensure(&mut api, &mut cur, prefer.as_deref()).and_then(|o| {
+            Cmd::Send(fam, id, data, reply) => {
+                let r = ensure(&mut api, &mut open, fam).and_then(|o| {
                     check_allowed(o, id)?;
                     o.last = None;
                     write(&o.dev, id, &data)
                 });
                 if r.is_err() {
-                    cur = None;
+                    open.remove(&fam);
                 }
                 let _ = reply.send(r);
             }
-            Cmd::Request(id, data, expect, timeout, reply) => {
-                let r = ensure(&mut api, &mut cur, prefer.as_deref()).and_then(|o| {
+            Cmd::Request(fam, id, data, expect, timeout, reply) => {
+                let r = ensure(&mut api, &mut open, fam).and_then(|o| {
                     check_allowed(o, id)?;
                     drain(&o.dev);
                     write(&o.dev, id, &data)?;
                     read_report(&o.dev, expect, timeout)
                 });
                 if r.is_err() {
-                    cur = None;
+                    open.remove(&fam);
                 }
                 let _ = reply.send(r);
             }
-            Cmd::Read(timeout, reply) => {
-                let r = ensure(&mut api, &mut cur, prefer.as_deref()).and_then(|o| read_new(o, timeout));
+            Cmd::Read(fam, timeout, reply) => {
+                let r = ensure(&mut api, &mut open, fam).and_then(|o| read_new(o, timeout));
                 if r.is_err() {
-                    cur = None;
+                    open.remove(&fam);
                 }
                 let _ = reply.send(r);
             }
             Cmd::RawmQuery(timeout, reply) => {
-                let r = ensure(&mut api, &mut cur, prefer.as_deref()).and_then(|o| {
-                    if o.spec.family != Family::Rawm {
-                        return Err("el dispositivo abierto no es RAWM".into());
-                    }
+                let r = ensure(&mut api, &mut open, Family::Rawm).and_then(|o| {
                     o.last = None;
                     rawm::query(&o.dev, rawm::channel_for(o.info.pid), timeout)
                 });
                 if r.is_err() {
-                    cur = None;
+                    open.remove(&Family::Rawm);
                 }
                 let _ = reply.send(r);
             }
@@ -200,42 +203,72 @@ fn check_allowed(o: &Open, id: u8) -> Result<(), String> {
     }
 }
 
-fn ensure<'a>(api: &mut Option<HidApi>, cur: &'a mut Option<Open>, prefer: Option<&str>) -> Result<&'a mut Open, String> {
-    if cur.is_none() {
-        let api = match api {
-            Some(a) => {
-                a.refresh_devices().map_err(|e| e.to_string())?;
-                a
-            }
-            None => api.insert(HidApi::new().map_err(|e| e.to_string())?),
-        };
-        let matches = |d: &hidapi::DeviceInfo| {
-            FAMILIES
-                .iter()
-                .find(|f| d.vendor_id() == f.vid && f.pids.contains(&d.product_id()) && d.usage_page() == f.usage_page)
-        };
-        let mut candidates: Vec<_> = api.device_list().filter_map(|d| matches(d).map(|f| (d, f))).collect();
-        // con el mouse RAWM por cable y el receptor enchufados, el que responde es el cable
-        candidates.sort_by_key(|(d, f)| f.family == Family::Rawm && RAWM_RECEIVERS.contains(&d.product_id()));
-        let (found, spec) = candidates
-            .iter()
-            .find(|(_, f)| Some(f.family.id()) == prefer)
-            .or_else(|| candidates.first())
-            .copied()
-            .ok_or_else(|| "No se encontró ningún mouse compatible (receptor o cable)".to_string())?;
-        let info = DeviceInfo {
-            vid: found.vendor_id(),
-            pid: found.product_id(),
-            product: found.product_string().unwrap_or_default().trim().to_string(),
-            manufacturer: found.manufacturer_string().unwrap_or_default().trim().to_string(),
-            cable: spec.family == Family::X6 && found.product_id() == X6_PID_CABLE,
-            usage_page: spec.usage_page,
-            family: spec.family.id().into(),
-        };
-        let dev = found.open_device(api).map_err(|e| e.to_string())?;
-        *cur = Some(Open { dev, info, spec, last: None });
+/// Mejor dispositivo presente de cada familia. Con el mouse RAWM por cable y el receptor
+/// enchufados a la vez se elige el cable (es el que responde).
+fn present(api: &mut HidApi) -> Result<Vec<(std::ffi::CString, DeviceInfo, &'static FamilySpec)>, String> {
+    api.refresh_devices().map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for spec in FAMILIES {
+        let mut cands: Vec<_> = api
+            .device_list()
+            .filter(|d| d.vendor_id() == spec.vid && spec.pids.contains(&d.product_id()) && d.usage_page() == spec.usage_page)
+            .collect();
+        cands.sort_by_key(|d| spec.family == Family::Rawm && RAWM_RECEIVERS.contains(&d.product_id()));
+        if let Some(d) = cands.first() {
+            let info = DeviceInfo {
+                vid: d.vendor_id(),
+                pid: d.product_id(),
+                product: d.product_string().unwrap_or_default().trim().to_string(),
+                manufacturer: d.manufacturer_string().unwrap_or_default().trim().to_string(),
+                cable: spec.family == Family::X6 && d.product_id() == X6_PID_CABLE,
+                usage_page: spec.usage_page,
+                family: spec.family.id().into(),
+            };
+            out.push((d.path().to_owned(), info, spec));
+        }
     }
-    Ok(cur.as_mut().unwrap())
+    Ok(out)
+}
+
+fn api_of(api: &mut Option<HidApi>) -> Result<&mut HidApi, String> {
+    if api.is_none() {
+        *api = Some(HidApi::new().map_err(|e| e.to_string())?);
+    }
+    Ok(api.as_mut().unwrap())
+}
+
+fn open_all(api: &mut Option<HidApi>, open: &mut HashMap<Family, Open>) -> Result<Vec<DeviceInfo>, String> {
+    let api = api_of(api)?;
+    let found = present(api)?;
+    // cerrar los que ya no están o cambiaron (p. ej. se enchufó el cable del RAWM)
+    open.retain(|fam, o| found.iter().any(|(_, i, s)| s.family == *fam && i.pid == o.info.pid));
+    for (path, info, spec) in found {
+        if open.contains_key(&spec.family) {
+            continue;
+        }
+        if let Ok(dev) = api.open_path(&path) {
+            open.insert(spec.family, Open { dev, info, spec, last: None });
+        }
+    }
+    if open.is_empty() {
+        return Err("No se encontró ningún mouse compatible (receptor o cable)".into());
+    }
+    let mut infos: Vec<DeviceInfo> = open.values().map(|o| o.info.clone()).collect();
+    infos.sort_by(|a, b| b.family.cmp(&a.family));
+    Ok(infos)
+}
+
+fn ensure<'a>(api: &mut Option<HidApi>, open: &'a mut HashMap<Family, Open>, fam: Family) -> Result<&'a mut Open, String> {
+    if !open.contains_key(&fam) {
+        let api = api_of(api)?;
+        let (path, info, spec) = present(api)?
+            .into_iter()
+            .find(|(_, _, s)| s.family == fam)
+            .ok_or_else(|| "No se encontró el mouse (receptor o cable)".to_string())?;
+        let dev = api.open_path(&path).map_err(|e| e.to_string())?;
+        open.insert(fam, Open { dev, info, spec, last: None });
+    }
+    Ok(open.get_mut(&fam).unwrap())
 }
 
 fn write(dev: &HidDevice, id: u8, data: &[u8]) -> Result<(), String> {
@@ -317,6 +350,10 @@ pub mod rawm {
     const CHANNEL_NONE: u8 = 0xFF;
     const CMD_QUERY: u8 = 0x1;
     const CMD_QUERY_RESULT: u8 = 0x2;
+
+    pub fn is_receiver(pid: u16) -> bool {
+        RAWM_RECEIVERS.contains(&pid)
+    }
 
     pub fn channel_for(pid: u16) -> u8 {
         if RAWM_RECEIVERS.contains(&pid) {
@@ -425,18 +462,44 @@ mod tests {
         assert_eq!(&p[..3], &[0xC0, 0x8D, 0x01]);
     }
 
+    /// Contra hardware real (solo lectura): abre todos los mouses a la vez y le pide el estado a cada uno.
+    /// `cargo test --lib -- --ignored multi_real --nocapture`
+    #[test]
+    #[ignore]
+    fn multi_real_devices_open_together() {
+        let hid = super::Hid::spawn();
+        let infos = hid.open_all().expect("no hay mouses");
+        for i in &infos {
+            println!("abierto: {} {} {:04X}:{:04X}", i.family, i.product, i.vid, i.pid);
+        }
+        if infos.iter().any(|i| i.family == "x6") {
+            let mut req = vec![0u8; 60];
+            req[0] = 0x06;
+            match hid.request(super::Family::X6, 0xB3, req, super::X6_REPORT_STATE, 2000) {
+                Ok(st) => println!("X6: batería {}%", st[19] & 0x7f),
+                Err(e) => println!("X6 sin respuesta (¿dormido o apagado?): {e}"),
+            }
+        }
+        if infos.iter().any(|i| i.family == "rawm") {
+            match hid.rawm_query(3000) {
+                Ok(j) => println!("RAWM: {}", &j[..j.len().min(90)]),
+                Err(e) => println!("RAWM sin respuesta (¿dormido?): {e}"),
+            }
+        }
+    }
+
     /// Contra hardware real (solo lectura): `cargo test --lib -- --ignored rawm_real`
     #[test]
     #[ignore]
     fn rawm_real_device_query() {
         let hid = super::Hid::spawn();
-        let info = hid.open(Some("rawm".into())).expect("no hay mouse RAWM");
-        assert_eq!(info.family, "rawm");
+        let infos = hid.open_all().expect("no hay mouses");
+        let info = infos.into_iter().find(|i| i.family == "rawm").expect("no hay mouse RAWM");
         let json = hid.rawm_query(4000).or_else(|_| hid.rawm_query(4000)).expect("sin respuesta");
         println!("{} {:04X}: {json}", info.product, info.pid);
         assert!(json.contains("\"dn\""));
         // lectura genérica (la que usa la UI)
-        let _ = hid.read(100).expect("hid_read");
+        let _ = hid.read(super::Family::Rawm, 100).expect("hid_read");
     }
 
     #[test]

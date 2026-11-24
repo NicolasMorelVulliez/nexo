@@ -2,7 +2,7 @@
 // Batería, DPI, polling y modo del mouse conectado, para cambiarlos sin abrir Nexo.
 import { motion } from "motion/react"
 import { useEffect } from "react"
-import { panelUpdate } from "../device/panel"
+import { panelSelect, panelUpdate } from "../device/panel"
 import { useDeviceName, useStore } from "../device/store"
 import { isTauri } from "../device/transport"
 import { SPRING } from "../lib/util"
@@ -32,6 +32,8 @@ export function TrayPanel() {
   const connected = useStore((s) => s.connected)
   const status = useStore((s) => s.status)
   const error = useStore((s) => s.error)
+  const devices = useStore((s) => s.devices).filter((d) => d.connected)
+  const activeId = useStore((s) => s.activeId)
   const wireless = caps.family === "x6" ? "Dongle 2.4 GHz" : "Receptor 2.4 GHz"
   const cable = mouse.connection === "cable"
 
@@ -67,6 +69,20 @@ export function TrayPanel() {
             </span>
           )}
         </div>
+
+        {/* con dos mouses: elegir cuál se ajusta (la batería de cada uno se ve en el selector) */}
+        {devices.length > 1 && (
+          <Segmented
+            ariaLabel="Mouse"
+            value={activeId ?? devices[0].id}
+            onChange={(id) => panelSelect(id)}
+            options={devices.map((d) => ({
+              value: d.id,
+              label: `${d.identity.product} · ${d.mouse.connection === "cable" && !d.mouse.charging ? "cable" : d.mouse.battery + "%"}`,
+            }))}
+            className="mt-3"
+          />
+        )}
 
         {connected ? (
           <>

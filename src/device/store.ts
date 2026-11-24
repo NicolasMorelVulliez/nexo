@@ -46,10 +46,25 @@ export interface AppSettings {
   installMode: "installed" | "portable"
 }
 
+/** Un mouse conectado (o simulado). El activo además se copia en mouse/caps/identity/connected. */
+export interface DeviceEntry {
+  /** familia: "x6" | "rawm" (un mouse por familia) */
+  id: string
+  caps: Capabilities
+  identity: DeviceIdentity
+  mouse: MouseState
+  connected: boolean
+}
+
 interface StoreState {
   shell: Shell
   tab: Tab
-  deviceTabOpen: boolean
+  /** mouses conectados (cada uno con su tarjeta en Inicio) */
+  devices: DeviceEntry[]
+  /** mouse activo: el que muestran las páginas de configuración */
+  activeId: string | null
+  /** mouses con pestaña abierta arriba */
+  deviceTabs: string[]
   settingsTabOpen: boolean
   section: DeviceSection
   settingsSection: SettingsSection
@@ -76,8 +91,12 @@ interface StoreState {
 
   setShell: (s: Shell) => void
   goHome: () => void
-  openDevice: (section?: DeviceSection) => void
-  closeDevice: () => void
+  /** Hace activo otro mouse (las páginas pasan a mostrar ese). */
+  selectDevice: (id: string) => void
+  /** Abre la pestaña de un mouse (por defecto el activo) y lo hace activo. */
+  openDevice: (section?: DeviceSection, id?: string) => void
+  /** Cierra la pestaña de un mouse (por defecto el activo). */
+  closeDevice: (id?: string) => void
   openSettings: (section?: SettingsSection) => void
   closeSettings: () => void
   setTab: (t: Tab) => void
@@ -85,7 +104,7 @@ interface StoreState {
   setSettingsSection: (s: SettingsSection) => void
   setFontDrawer: (open: boolean) => void
   connect: () => void
-  /** Web: abre el selector para elegir otro mouse. Escritorio: pasa al otro mouse conectado. */
+  /** Web: abre el selector para sumar otro mouse. Escritorio: vuelve a buscar mouses conectados. */
   addDevice: () => void
   disconnect: () => void
   setFlyout: (open: boolean) => void
@@ -105,9 +124,9 @@ interface StoreState {
 export const LIVE = !params.mockup
 
 /** El controlador en vivo registra acá cómo conectar (evita una importación circular). */
-export const hooks: { connect: null | ((interactive: boolean) => void); switchDevice: null | (() => void) } = {
+export const hooks: { connect: null | ((interactive: boolean) => void); rescan: null | (() => void) } = {
   connect: null,
-  switchDevice: null,
+  rescan: null,
 }
 
 // En modo real el "Guardado en el mouse" lo marca el controlador cuando el envío termina.
@@ -141,22 +160,45 @@ const es21Mock: Partial<MouseState> = {
   light: { mode: "dpi", color: { r: 255, g: 255, b: 255 }, brightness: 160, speed: 128, autoOff: true },
 }
 
+/** Mouses simulados del mockup: los dos a la vez (el activo lo elige ?device=). */
+const mockDevices: DeviceEntry[] = LIVE
+  ? []
+  : [
+      {
+        id: "x6",
+        caps: X6_CAPS,
+        identity: { vendor: "Motospeed", product: "X6 Max", vid: 0x0bda, pid: 0xffe0, source: "recordado" },
+        mouse: createMockMouse({ charging: params.charging, ...(params.battery !== undefined ? { battery: params.battery } : {}) }),
+        connected: params.connected,
+      },
+      {
+        id: "rawm",
+        caps: rawmCaps(DEFAULT_RAWM_MODEL),
+        identity: { vendor: "RAWM", product: DEFAULT_RAWM_MODEL.name, vid: 0x1915, pid: 0x233c, source: "firmware" },
+        mouse: createMockMouse({ ...es21Mock, battery: 64, charging: false }),
+        connected: params.connected,
+      },
+    ]
+const mockActive = mockDevices.find((d) => d.id === (mockEs21 ? "rawm" : "x6"))
+
 /** Nombre real del dispositivo, p. ej. "Motospeed X6 Max". */
 export const useDeviceName = () => useStore((s) => `${s.identity.vendor} ${s.identity.product}`)
 
 export const useStore = create<StoreState>((set) => ({
   shell: isTauri() ? "desktop" : params.shell,
   tab: params.connected ? params.tab : "home",
-  deviceTabOpen: params.connected && params.tab === "device",
+  devices: mockDevices,
+  activeId: mockActive?.id ?? null,
+  deviceTabs: params.connected && params.tab === "device" && mockActive ? [mockActive.id] : [],
   settingsTabOpen: params.tab === "settings",
   section: params.section,
   settingsSection: params.settingsSection,
   fontDrawer: params.fontDrawer,
   connected: params.connected,
   // En la app real sale de HIDDevice.productName / hidapi o del firmware (ver identity.ts).
-  identity: initialIdentity,
-  caps: initialCaps,
-  mouse: createMockMouse({
+  identity: mockActive?.identity ?? initialIdentity,
+  caps: mockActive?.caps ?? initialCaps,
+  mouse: mockActive?.mouse ?? createMockMouse({
     ...(mockEs21 ? es21Mock : {}),
     charging: params.charging,
     ...(params.battery !== undefined ? { battery: params.battery } : {}),
@@ -197,24 +239,52 @@ export const useStore = create<StoreState>((set) => ({
 
   setShell: (shell) => set({ shell }),
   goHome: () => set({ tab: "home" }),
-  openDevice: (section) =>
-    set((s) => ({ tab: "device", deviceTabOpen: true, section: section ?? s.section })),
-  closeDevice: () => set((s) => ({ deviceTabOpen: false, tab: s.tab === "device" ? "home" : s.tab })),
+  selectDevice: (id) =>
+    set((s) => {
+      const d = s.devices.find((x) => x.id === id)
+      if (!d || s.activeId === id) return {}
+      return { activeId: id, mouse: d.mouse, caps: d.caps, identity: d.identity, connected: d.connected }
+    }),
+  openDevice: (section, id) => {
+    const target = id ?? useStore.getState().activeId
+    if (target) useStore.getState().selectDevice(target)
+    set((s) => ({
+      tab: "device",
+      deviceTabs: target && !s.deviceTabs.includes(target) ? [...s.deviceTabs, target] : s.deviceTabs,
+      section: section ?? s.section,
+    }))
+  },
+  closeDevice: (id) =>
+    set((s) => {
+      const target = id ?? s.activeId
+      const deviceTabs = s.deviceTabs.filter((t) => t !== target)
+      const closingActive = s.tab === "device" && target === s.activeId
+      if (!closingActive) return { deviceTabs }
+      // si queda otra pestaña de mouse, se pasa a esa
+      const next = deviceTabs[deviceTabs.length - 1]
+      const d = next ? s.devices.find((x) => x.id === next) : undefined
+      return d
+        ? { deviceTabs, activeId: d.id, mouse: d.mouse, caps: d.caps, identity: d.identity, connected: d.connected }
+        : { deviceTabs, tab: "home" as Tab }
+    }),
   openSettings: (section) =>
     set((s) => ({ tab: "settings", settingsTabOpen: true, settingsSection: section ?? s.settingsSection })),
   closeSettings: () =>
     set((s) => ({
       settingsTabOpen: false,
       fontDrawer: false,
-      tab: s.tab === "settings" ? (s.deviceTabOpen ? "device" : "home") : s.tab,
+      tab: s.tab === "settings" ? (s.deviceTabs.length ? "device" : "home") : s.tab,
     })),
   setTab: (tab) => set({ tab }),
   setSection: (section) => set({ section }),
   setSettingsSection: (settingsSection) => set({ settingsSection }),
   setFontDrawer: (fontDrawer) => set({ fontDrawer }),
-  connect: () => (hooks.connect ? hooks.connect(true) : set({ connected: true })),
-  addDevice: () => (isTauri() ? hooks.switchDevice?.() : hooks.connect?.(true)),
-  disconnect: () => set({ connected: false, tab: "home", deviceTabOpen: false }),
+  connect: () =>
+    hooks.connect
+      ? hooks.connect(true)
+      : set((s) => ({ connected: true, devices: s.devices.map((d) => ({ ...d, connected: true })) })),
+  addDevice: () => (isTauri() ? hooks.rescan?.() : hooks.connect?.(true)),
+  disconnect: () => set({ connected: false, tab: "home", deviceTabs: [] }),
   setFlyout: (flyoutOpen) => set({ flyoutOpen }),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   selectButton: (selectedButton) => set({ selectedButton }),
@@ -236,3 +306,14 @@ export const useStore = create<StoreState>((set) => ({
   setIdentityName: (vendor, product) =>
     set((s) => ({ identity: { ...s.identity, vendor: vendor.trim() || "Motospeed", product: product.trim() || "X6", source: "recordado" } })),
 }))
+
+// El mouse activo se edita en mouse/caps/identity/connected; se refleja en su entrada de devices.
+useStore.subscribe((s, prev) => {
+  if (!s.activeId || s.activeId !== prev.activeId) return
+  if (s.mouse === prev.mouse && s.caps === prev.caps && s.identity === prev.identity && s.connected === prev.connected) return
+  const i = s.devices.findIndex((d) => d.id === s.activeId)
+  if (i < 0) return
+  const devices = s.devices.slice()
+  devices[i] = { ...devices[i], mouse: s.mouse, caps: s.caps, identity: s.identity, connected: s.connected }
+  useStore.setState({ devices })
+})

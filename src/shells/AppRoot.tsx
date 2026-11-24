@@ -94,9 +94,20 @@ function TopBar({ trailing }: { trailing?: ReactNode }) {
         </button>
       </div>
 
-      {s.deviceTabOpen && (
-        <Tab label={deviceName} selected={s.tab === "device"} onSelect={() => s.setTab("device")} onClose={s.closeDevice} />
-      )}
+      {/* una pestaña por mouse abierto (cambiar de pestaña cambia el mouse que se configura) */}
+      {s.deviceTabs.map((id) => {
+        const d = s.devices.find((x) => x.id === id)
+        if (!d) return null
+        return (
+          <Tab
+            key={id}
+            label={id === s.activeId ? deviceName : `${d.identity.vendor} ${d.identity.product}`}
+            selected={s.tab === "device" && s.activeId === id}
+            onSelect={() => s.openDevice(undefined, id)}
+            onClose={() => s.closeDevice(id)}
+          />
+        )
+      })}
       {s.settingsTabOpen && (
         <Tab label="Ajustes" selected={s.tab === "settings"} onSelect={() => s.setTab("settings")} onClose={s.closeSettings} />
       )}

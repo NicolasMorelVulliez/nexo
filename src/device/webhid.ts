@@ -13,20 +13,32 @@ export async function grantedDevices() {
   return (await navigator.hid.getDevices()).filter((d) => driverOf(d))
 }
 
+type Found = { transport: Transport; driver: DeviceDriver }
+
 /**
- * Conecta por WebHID. Con `interactive` muestra el selector del navegador (requiere un clic);
- * sin él, solo reutiliza un permiso ya otorgado (reconexión automática).
- * `prefer` elige la familia si hay más de un mouse compatible conectado.
+ * Conecta por WebHID todos los mouses con permiso (uno por familia), salteando las familias de
+ * `skip` (ya conectadas). Con `interactive` primero muestra el selector del navegador para sumar
+ * otro mouse (requiere un clic).
  */
-export async function connectWebHid(interactive: boolean, prefer?: string): Promise<{ transport: Transport; driver: DeviceDriver }> {
+export async function connectWebHidAll(interactive: boolean, skip: string[] = []): Promise<Found[]> {
   if (!("hid" in navigator)) throw new Error("Este navegador no soporta WebHID. Usá Chrome o Edge.")
-  let devices = interactive ? [] : await grantedDevices()
-  if (interactive) devices = (await navigator.hid.requestDevice({ filters: WEBHID_FILTERS })).filter((d) => driverOf(d))
-  // si el mouse está por cable y además está el receptor, el que responde es el cable
+  const picked = interactive ? (await navigator.hid.requestDevice({ filters: WEBHID_FILTERS })).filter((d) => driverOf(d)) : []
+  if (interactive && !picked.length) throw new Error("No se eligió el mouse.")
+  const devices = [...picked, ...(await grantedDevices())]
+  // si el mouse RAWM está por cable y además está el receptor, el que responde es el cable
   devices.sort((a, b) => Number(isReceiver(a)) - Number(isReceiver(b)))
-  const dev = devices.find((d) => driverOf(d)?.family === prefer) ?? devices[0]
-  if (!dev) throw new Error(interactive ? "No se eligió el mouse." : "Sin permiso guardado.")
-  const driver = driverOf(dev)!
+  const out: Found[] = []
+  const seen = new Set(skip)
+  for (const dev of devices) {
+    const driver = driverOf(dev)!
+    if (seen.has(driver.family)) continue
+    seen.add(driver.family)
+    out.push(await openWebHid(dev, driver))
+  }
+  return out
+}
+
+async function openWebHid(dev: HIDDevice, driver: DeviceDriver): Promise<Found> {
   if (!dev.opened) await dev.open()
 
   const disconnectCbs: Array<() => void> = []

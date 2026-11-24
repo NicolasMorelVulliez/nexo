@@ -1,6 +1,7 @@
 //! Nexo — núcleo de escritorio (Tauri 2).
 //!
-//! - HID: un hilo dueño del mouse (hid.rs, Motospeed X6 y RAWM); la UI y la bandeja le piden comandos.
+//! - HID: un hilo dueño de los mouses (hid.rs, Motospeed X6 y RAWM, los dos a la vez si están
+//!   conectados); la UI y la bandeja le piden comandos indicando la familia.
 //! - Bandeja: ícono con el % de batería dibujado en runtime (tray_icon.rs); clic izquierdo abre el
 //!   panel rápido (ventana "panel", ?panel=1), clic derecho el menú.
 //! - Ventana: al cerrarla se destruye el WebView (la bandeja sigue viva con muy poca RAM);
@@ -12,6 +13,7 @@ mod hid;
 mod tray_icon;
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -22,9 +24,11 @@ use tauri_plugin_updater::UpdaterExt;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 
-#[derive(Clone, Copy, Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Battery {
+    /** familia del mouse ("x6" | "rawm") */
+    family: String,
     connected: bool,
     level: Option<u8>,
     charging: bool,
@@ -33,13 +37,17 @@ struct Battery {
 
 struct Shared {
     hid: hid::Hid,
-    info: Mutex<Option<hid::DeviceInfo>>,
-    battery: Mutex<Battery>,
+    /** mouses abiertos (uno por familia) */
+    info: Mutex<Vec<hid::DeviceInfo>>,
+    battery: Mutex<HashMap<String, Battery>>,
+    /** mouse que muestra el ícono de la bandeja (el activo en la UI) */
+    tray_family: Mutex<Option<String>>,
+    /** nombre de cada mouse para el tooltip */
+    names: Mutex<HashMap<String, String>>,
     last_io: Mutex<Instant>,
     poll_secs: AtomicU64,
     poll_now: AtomicBool,
     style: Mutex<tray_icon::Style>,
-    name: Mutex<String>,
     portable: bool,
     data_dir: Option<PathBuf>,
     /** ítem del menú de la bandeja para actualizar (cambia de texto si hay versión nueva) */
@@ -66,23 +74,23 @@ struct AppInfo {
 /* ───────────── Comandos para la UI ───────────── */
 
 #[tauri::command(async)]
-fn hid_open(state: State<Shared>, prefer: Option<String>) -> Result<hid::DeviceInfo, String> {
+fn hid_open_all(state: State<Shared>) -> Result<Vec<hid::DeviceInfo>, String> {
     touch_io(&state);
-    let info = state.hid.open(prefer)?;
-    *state.info.lock().unwrap() = Some(info.clone());
-    Ok(info)
+    let infos = state.hid.open_all()?;
+    *state.info.lock().unwrap() = infos.clone();
+    Ok(infos)
 }
 
 #[tauri::command(async)]
-fn hid_send(state: State<Shared>, report_id: u8, data: Vec<u8>) -> Result<(), String> {
+fn hid_send(state: State<Shared>, family: String, report_id: u8, data: Vec<u8>) -> Result<(), String> {
     touch_io(&state);
-    state.hid.send(report_id, data)
+    state.hid.send(hid::Family::parse(&family)?, report_id, data)
 }
 
 #[tauri::command(async)]
-fn hid_read(state: State<Shared>, timeout_ms: u64) -> Result<Vec<Vec<u8>>, String> {
+fn hid_read(state: State<Shared>, family: String, timeout_ms: u64) -> Result<Vec<Vec<u8>>, String> {
     touch_io(&state);
-    state.hid.read(timeout_ms)
+    state.hid.read(hid::Family::parse(&family)?, timeout_ms)
 }
 
 /// Marca actividad de la UI: el sondeo de batería RAWM espera para no mezclar respuestas.
@@ -93,13 +101,14 @@ fn touch_io(state: &Shared) {
 #[tauri::command(async)]
 fn hid_request(
     state: State<Shared>,
+    family: String,
     report_id: u8,
     data: Vec<u8>,
     expect: u8,
     timeout_ms: u64,
 ) -> Result<Vec<u8>, String> {
     touch_io(&state);
-    state.hid.request(report_id, data, expect, timeout_ms)
+    state.hid.request(hid::Family::parse(&family)?, report_id, data, expect, timeout_ms)
 }
 
 #[tauri::command]
@@ -108,19 +117,27 @@ fn app_info(state: State<Shared>) -> AppInfo {
 }
 
 #[tauri::command]
-fn battery_state(state: State<Shared>) -> Battery {
-    *state.battery.lock().unwrap()
+fn battery_state(state: State<Shared>) -> Vec<Battery> {
+    state.battery.lock().unwrap().values().cloned().collect()
 }
 
+/// Preferencias de la bandeja: estilo, intervalo, qué mouse muestra el ícono y el nombre de cada uno.
 #[tauri::command]
-fn set_tray_prefs(app: AppHandle, state: State<Shared>, style: String, poll_secs: u64, name: String) {
+fn set_tray_prefs(
+    app: AppHandle,
+    state: State<Shared>,
+    style: String,
+    poll_secs: u64,
+    family: Option<String>,
+    names: HashMap<String, String>,
+) {
     *state.style.lock().unwrap() = if style == "nobg" { tray_icon::Style::NoBg } else { tray_icon::Style::Bg };
     state.poll_secs.store(poll_secs.clamp(15, 3600), Ordering::Relaxed);
-    if !name.trim().is_empty() {
-        *state.name.lock().unwrap() = name.trim().to_string();
+    if family.is_some() {
+        *state.tray_family.lock().unwrap() = family;
     }
-    let b = *state.battery.lock().unwrap();
-    update_tray(&app, b, 0);
+    state.names.lock().unwrap().extend(names.into_iter().filter(|(_, v)| !v.trim().is_empty()));
+    update_tray(&app, 0);
 }
 
 #[tauri::command]
@@ -189,54 +206,82 @@ fn state_request() -> Vec<u8> {
     d
 }
 
-fn family(shared: &Shared) -> Option<String> {
-    shared.info.lock().unwrap().as_ref().map(|i| i.family.clone())
+fn has_rawm(shared: &Shared) -> bool {
+    shared.info.lock().unwrap().iter().any(|i| i.family == "rawm")
 }
 
-fn poll_once(shared: &Shared) -> Result<Battery, String> {
-    let info = shared.info.lock().unwrap().clone();
-    match info.as_ref().map(|i| i.family.as_str()) {
-        Some("rawm") => {
-            let json = shared.hid.rawm_query(2500)?;
-            let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-            let wired = v.get("wired").and_then(|x| x.as_u64()) == Some(1);
-            Ok(Battery {
-                connected: true,
-                level: v.get("battery").and_then(|x| x.as_u64()).map(|b| b.min(100) as u8),
-                charging: v.get("chr").and_then(|x| x.as_u64()) == Some(1),
-                cable: wired,
-            })
-        }
-        Some(_) => {
-            let data = shared.hid.request(0xB3, state_request(), hid::X6_REPORT_STATE, 1500)?;
-            if data.len() < 20 {
-                return Err("estado corto".into());
-            }
-            let raw = data[19];
-            let cable = info.map(|i| i.cable).unwrap_or(false);
-            Ok(Battery { connected: true, level: Some((raw & 0x7F).min(100)), charging: raw & 0x80 != 0, cable })
-        }
-        None => Err("sin dispositivo".into()),
+fn poll_once(shared: &Shared, info: &hid::DeviceInfo) -> Result<Battery, String> {
+    if info.family == "rawm" {
+        let json = shared.hid.rawm_query(2500)?;
+        let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        let direct = !hid::rawm::is_receiver(info.pid);
+        return Ok(Battery {
+            family: info.family.clone(),
+            connected: true,
+            level: v.get("battery").and_then(|x| x.as_u64()).map(|b| b.min(100) as u8),
+            charging: v.get("chr").and_then(|x| x.as_u64()) == Some(1),
+            cable: direct || v.get("wired").and_then(|x| x.as_u64()) == Some(1),
+        });
     }
+    let data = shared.hid.request(hid::Family::X6, 0xB3, state_request(), hid::X6_REPORT_STATE, 1500)?;
+    if data.len() < 20 {
+        return Err("estado corto".into());
+    }
+    let raw = data[19];
+    Ok(Battery {
+        family: info.family.clone(),
+        connected: true,
+        level: Some((raw & 0x7F).min(100)),
+        charging: raw & 0x80 != 0,
+        cable: info.cable,
+    })
 }
 
-fn poll_battery(app: &AppHandle) -> Battery {
+/// Consulta la batería de cada mouse abierto (si falla, vuelve a enumerar una vez).
+fn poll_battery(app: &AppHandle) -> Vec<Battery> {
     let shared = app.state::<Shared>();
-    let mut attempt = poll_once(&shared);
-    if attempt.is_err() {
-        // puede que el receptor se haya reconectado: volver a enumerar y reintentar
-        if let Ok(info) = shared.hid.open(family(&shared)) {
-            *shared.info.lock().unwrap() = Some(info);
-            attempt = poll_once(&shared);
+    if shared.info.lock().unwrap().is_empty() {
+        if let Ok(infos) = shared.hid.open_all() {
+            *shared.info.lock().unwrap() = infos;
         }
     }
-    attempt.unwrap_or_default()
+    let infos = shared.info.lock().unwrap().clone();
+    let mut out = Vec::new();
+    let mut failed = false;
+    for info in &infos {
+        match poll_once(&shared, info) {
+            Ok(b) => out.push(b),
+            Err(_) => failed = true,
+        }
+    }
+    if failed {
+        // puede que un receptor se haya reconectado: volver a enumerar y reintentar los que fallaron
+        if let Ok(infos) = shared.hid.open_all() {
+            *shared.info.lock().unwrap() = infos.clone();
+            let done: Vec<String> = out.iter().map(|b| b.family.clone()).collect();
+            for info in infos.iter().filter(|i| !done.contains(&i.family)) {
+                if let Ok(b) = poll_once(&shared, info) {
+                    out.push(b);
+                }
+            }
+        }
+    }
+    out
 }
 
-fn update_tray(app: &AppHandle, b: Battery, frame: u8) {
+/// Batería que muestra el ícono: la del mouse activo en la UI (o la primera que haya).
+fn tray_battery(shared: &Shared) -> Battery {
+    let map = shared.battery.lock().unwrap();
+    let fam = shared.tray_family.lock().unwrap().clone();
+    fam.and_then(|f| map.get(&f).cloned())
+        .or_else(|| map.values().find(|b| b.connected).cloned())
+        .unwrap_or_default()
+}
+
+fn update_tray(app: &AppHandle, frame: u8) {
     let shared = app.state::<Shared>();
     let style = *shared.style.lock().unwrap();
-    let name = shared.name.lock().unwrap().clone();
+    let b = tray_battery(&shared);
     let level = if b.connected { b.level } else { None };
     let rgba = tray_icon::render(tray_icon::State {
         level,
@@ -245,9 +290,23 @@ fn update_tray(app: &AppHandle, b: Battery, frame: u8) {
         style,
         frame,
     });
+    // tooltip: una línea por mouse (el del ícono primero)
+    let names = shared.names.lock().unwrap().clone();
+    let mut all: Vec<Battery> = shared.battery.lock().unwrap().values().filter(|x| x.connected).cloned().collect();
+    all.sort_by_key(|x| x.family != b.family);
+    let name_of = |f: &str| names.get(f).cloned().unwrap_or_else(|| if f == "rawm" { "RAWM".into() } else { "Motospeed X6".into() });
+    let tip = if all.is_empty() {
+        tray_icon::tooltip(None, false, false, &name_of(&b.family))
+    } else {
+        all.iter()
+            .map(|x| tray_icon::tooltip(x.level, x.charging, x.cable, &name_of(&x.family)))
+            .collect::<Vec<_>>()
+            .join("
+")
+    };
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_icon(Some(Image::new_owned(rgba, tray_icon::SIZE, tray_icon::SIZE)));
-        let _ = tray.set_tooltip(Some(tray_icon::tooltip(level, b.charging, b.connected && b.cable, &name)));
+        let _ = tray.set_tooltip(Some(tip));
     }
 }
 
@@ -257,18 +316,26 @@ fn poll_loop(app: AppHandle) {
     loop {
         let shared = app.state::<Shared>();
         let every = Duration::from_secs(shared.poll_secs.load(Ordering::Relaxed));
-        let ui_busy = family(&shared).as_deref() == Some("rawm") && shared.last_io.lock().unwrap().elapsed() < Duration::from_secs(3);
+        let ui_busy = has_rawm(&shared) && shared.last_io.lock().unwrap().elapsed() < Duration::from_secs(3);
         if !ui_busy && (shared.poll_now.swap(false, Ordering::Relaxed) || last.elapsed() >= every) {
             last = Instant::now();
-            let b = poll_battery(&app);
-            *shared.battery.lock().unwrap() = b;
-            update_tray(&app, b, frame);
-            let _ = app.emit("battery", b);
+            let all = poll_battery(&app);
+            {
+                let mut map = shared.battery.lock().unwrap();
+                map.clear();
+                for b in &all {
+                    map.insert(b.family.clone(), b.clone());
+                }
+            }
+            update_tray(&app, frame);
+            for b in all {
+                let _ = app.emit("battery", b);
+            }
         } else {
-            let b = *shared.battery.lock().unwrap();
+            let b = tray_battery(&shared);
             if b.connected && b.charging {
                 frame = (frame + 1) % 4; // animación de carga en el ícono
-                update_tray(&app, b, frame);
+                update_tray(&app, frame);
             }
         }
         std::thread::sleep(Duration::from_millis(450));
@@ -278,7 +345,7 @@ fn poll_loop(app: AppHandle) {
 /* ───────────── Panel rápido de la bandeja ───────────── */
 
 const PANEL_W: f64 = 360.0;
-const PANEL_H: f64 = 480.0;
+const PANEL_H: f64 = 530.0;
 /** momento en que se cerró el panel (para que el mismo clic en el ícono no lo vuelva a abrir) */
 static PANEL_CLOSED: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -386,13 +453,14 @@ pub fn run() {
         ))
         .manage(Shared {
             hid: hid::Hid::spawn(),
-            info: Mutex::new(None),
-            battery: Mutex::new(Battery::default()),
+            info: Mutex::new(Vec::new()),
+            battery: Mutex::new(HashMap::new()),
+            tray_family: Mutex::new(None),
+            names: Mutex::new(HashMap::new()),
             last_io: Mutex::new(Instant::now() - Duration::from_secs(60)),
             poll_secs: AtomicU64::new(60),
             poll_now: AtomicBool::new(true),
             style: Mutex::new(tray_icon::Style::Bg),
-            name: Mutex::new("Nexo".into()),
             portable,
             data_dir,
             update_item: Mutex::new(None),
@@ -400,7 +468,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            hid_open,
+            hid_open_all,
             hid_send,
             hid_request,
             hid_read,

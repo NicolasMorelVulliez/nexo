@@ -726,7 +726,7 @@ function AboutPage() {
             <div>
               <div className="text-[24px] font-bold">Nexo</div>
               <div className="text-[13.5px] text-[var(--fg-2)]">
-                Versión 0.2.1 · {desktop ? (s.app.installMode === "installed" ? "Instalada" : "Portable") : "Web"}
+                Versión 0.3.0 · {desktop ? (s.app.installMode === "installed" ? "Instalada" : "Portable") : "Web"}
               </div>
             </div>
           </div>
