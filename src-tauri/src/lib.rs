@@ -1,7 +1,8 @@
 //! Nexo — núcleo de escritorio (Tauri 2).
 //!
 //! - HID: un hilo dueño del mouse (hid.rs, Motospeed X6 y RAWM); la UI y la bandeja le piden comandos.
-//! - Bandeja: ícono con el % de batería dibujado en runtime (tray_icon.rs).
+//! - Bandeja: ícono con el % de batería dibujado en runtime (tray_icon.rs); clic izquierdo abre el
+//!   panel rápido (ventana "panel", ?panel=1), clic derecho el menú.
 //! - Ventana: al cerrarla se destruye el WebView (la bandeja sigue viva con muy poca RAM);
 //!   se vuelve a crear al hacer clic en el ícono.
 //! - Portable: si junto al exe hay un archivo "portable" (o portable.ini), los datos se
@@ -17,6 +18,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri_plugin_updater::UpdaterExt;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -40,6 +42,18 @@ struct Shared {
     name: Mutex<String>,
     portable: bool,
     data_dir: Option<PathBuf>,
+    /** ítem del menú de la bandeja para actualizar (cambia de texto si hay versión nueva) */
+    update_item: Mutex<Option<MenuItem<tauri::Wry>>>,
+    update: Mutex<Option<UpdateInfo>>,
+}
+
+const RELEASES_URL: &str = "https://github.com/NicolasMorelVulliez/nexo/releases/latest";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -112,6 +126,54 @@ fn set_tray_prefs(app: AppHandle, state: State<Shared>, style: String, poll_secs
 #[tauri::command]
 fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+/* ───────────── Actualizaciones (GitHub Releases + tauri-plugin-updater) ───────────── */
+
+async fn check_update(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let found = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    let info = found.map(|u| UpdateInfo { version: u.version.clone(), notes: u.body.clone() });
+    let shared = app.state::<Shared>();
+    *shared.update.lock().unwrap() = info.clone();
+    if let Some(item) = shared.update_item.lock().unwrap().as_ref() {
+        let text = match &info {
+            Some(i) => format!("Instalar actualización ({})", i.version),
+            None => "Buscar actualizaciones".to_string(),
+        };
+        let _ = item.set_text(text);
+    }
+    if let Some(i) = &info {
+        let _ = app.emit("update-available", i.clone());
+    }
+    Ok(info)
+}
+
+async fn install_update(app: &AppHandle) -> Result<(), String> {
+    if app.state::<Shared>().portable {
+        // la portable no se instala: se abre la página de descargas
+        let _ = std::process::Command::new("explorer").arg(RELEASES_URL).spawn();
+        return Ok(());
+    }
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Ya tenés la última versión".to_string())?;
+    let _ = app.emit("update-progress", "downloading");
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    app.restart();
+}
+
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    check_update(&app).await
+}
+
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    install_update(&app).await
 }
 
 #[tauri::command]
@@ -213,6 +275,71 @@ fn poll_loop(app: AppHandle) {
     }
 }
 
+/* ───────────── Panel rápido de la bandeja ───────────── */
+
+const PANEL_W: f64 = 360.0;
+const PANEL_H: f64 = 480.0;
+/** momento en que se cerró el panel (para que el mismo clic en el ícono no lo vuelva a abrir) */
+static PANEL_CLOSED: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn toggle_panel(app: &AppHandle, cursor: tauri::PhysicalPosition<f64>) {
+    if let Some(w) = app.get_webview_window("panel") {
+        let _ = w.close();
+        return;
+    }
+    if PANEL_CLOSED.lock().unwrap().is_some_and(|t| t.elapsed() < Duration::from_millis(350)) {
+        return;
+    }
+    let shared = app.state::<Shared>();
+    let mut builder = WebviewWindowBuilder::new(app, "panel", WebviewUrl::App("index.html?panel=1".into()))
+        .title("Nexo")
+        .inner_size(PANEL_W, PANEL_H)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .transparent(true)
+        .shadow(false)
+        .visible(false);
+    if let Some(dir) = &shared.data_dir {
+        builder = builder.data_directory(dir.clone());
+    }
+    let Ok(w) = builder.build() else { return };
+    // arriba del ícono, dentro del área de trabajo (sin tapar la barra de tareas)
+    if let Ok(Some(m)) = app.monitor_from_point(cursor.x, cursor.y) {
+        let s = m.scale_factor();
+        let work = m.work_area();
+        let (pw, ph, pad) = (PANEL_W * s, PANEL_H * s, 6.0 * s);
+        let (wx, wy) = (work.position.x as f64, work.position.y as f64);
+        let (ww, wh) = (work.size.width as f64, work.size.height as f64);
+        let x = (cursor.x - pw / 2.0).clamp(wx + pad, wx + ww - pw - pad);
+        let y = if cursor.y < wy { wy + pad } else { wy + wh - ph - pad };
+        let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    let _ = w.show();
+    let _ = w.set_focus();
+    let w2 = w.clone();
+    w.on_window_event(move |e| {
+        if let tauri::WindowEvent::Focused(false) = e {
+            *PANEL_CLOSED.lock().unwrap() = Some(Instant::now());
+            let _ = w2.close();
+        }
+    });
+}
+
+#[tauri::command]
+fn open_main(app: AppHandle) {
+    if let Some(p) = app.get_webview_window("panel") {
+        let _ = p.close();
+    }
+    show_main(&app);
+}
+
+#[tauri::command]
+fn main_window_open(app: AppHandle) -> bool {
+    app.get_webview_window("main").is_some()
+}
+
 /* ───────────── Ventana ───────────── */
 
 fn show_main(app: &AppHandle) {
@@ -268,7 +395,10 @@ pub fn run() {
             name: Mutex::new("Nexo".into()),
             portable,
             data_dir,
+            update_item: Mutex::new(None),
+            update: Mutex::new(None),
         })
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hid_open,
             hid_send,
@@ -278,14 +408,20 @@ pub fn run() {
             battery_state,
             set_tray_prefs,
             refresh_battery,
+            update_check,
+            update_install,
+            open_main,
+            main_window_open,
             quit_app
         ])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Abrir Nexo", true, None::<&str>)?;
             let refresh = MenuItem::with_id(app, "refresh", "Actualizar batería", true, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", "Buscar actualizaciones", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &refresh, &sep, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &refresh, &update, &sep, &quit])?;
+            *app.state::<Shared>().update_item.lock().unwrap() = Some(update.clone());
             let icon = tray_icon::render(tray_icon::State {
                 level: None,
                 charging: false,
@@ -301,12 +437,26 @@ pub fn run() {
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => show_main(app),
                     "refresh" => app.state::<Shared>().poll_now.store(true, Ordering::Relaxed),
+                    "update" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let pending = app.state::<Shared>().update.lock().unwrap().is_some();
+                            if pending {
+                                let _ = install_update(&app).await;
+                            } else if let Ok(None) = check_update(&app).await {
+                                if let Some(item) = app.state::<Shared>().update_item.lock().unwrap().as_ref() {
+                                    let _ = item.set_text("Nexo está al día");
+                                }
+                            }
+                        });
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, e| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-                        show_main(tray.app_handle());
+                    // clic izquierdo: panel rápido (batería, DPI, polling, modo); "Abrir Nexo" está en el panel y en el menú
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, position, .. } = e {
+                        toggle_panel(tray.app_handle(), position);
                     }
                 })
                 .build(app)?;
@@ -316,6 +466,15 @@ pub fn run() {
             }
             let handle = app.handle().clone();
             std::thread::Builder::new().name("nexo-battery".into()).spawn(move || poll_loop(handle))?;
+            // buscar actualizaciones al arrancar y cada 6 horas
+            let handle = app.handle().clone();
+            std::thread::Builder::new().name("nexo-update".into()).spawn(move || {
+                std::thread::sleep(Duration::from_secs(20));
+                loop {
+                    let _ = tauri::async_runtime::block_on(check_update(&handle));
+                    std::thread::sleep(Duration::from_secs(6 * 3600));
+                }
+            })?;
             Ok(())
         })
         .build(tauri::generate_context!())

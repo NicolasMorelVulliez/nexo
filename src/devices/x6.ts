@@ -39,6 +39,7 @@ export const X6_CAPS: Capabilities = {
   light: { modes: ["off", "static", "breath", "rainbow"], palette: "rgb", speed: true, brightness: true, autoOff: false, readable: false },
   remap: true,
   buttons: ["left", "right", "middle", "side1", "side2"],
+  image: "x6",
   battery: true,
 }
 

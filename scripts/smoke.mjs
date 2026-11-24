@@ -130,6 +130,11 @@ try {
   await page.goto(`${BASE}/?mockup=1&device=es21&view=acerca`, { waitUntil: "networkidle0" })
   check("ES21: VID:PID real en Acerca de", await bodyHas("1915:233C"))
 
+  // 11) Panel rápido de la bandeja
+  await page.setViewport({ width: 360, height: 480 })
+  await page.goto(`${BASE}/?mockup=1&panel=1&device=es21`, { waitUntil: "networkidle0" })
+  check("panel: DPI, polling y modo", (await bodyHas("Polling rate")) && (await bodyHas("Alto rendimiento")) && (await bodyHas("Abrir Nexo")))
+
   check(`sin errores en consola (${errors.length})`, errors.length === 0)
   if (errors.length) console.log(errors.join("\n"))
 } finally {

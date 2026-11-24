@@ -1,5 +1,6 @@
 import { motion } from "motion/react"
-import { useDeviceName, useStore } from "../device/store"
+import { LIVE, useDeviceName, useStore } from "../device/store"
+import { hasWebHid, isTauri } from "../device/transport"
 import { Button } from "../ui/controls"
 import { BatteryReadout } from "../ui/display"
 import { IconBulb, IconHand, IconPlus, IconSignal, IconSliders, IconPlug } from "../ui/icons"
@@ -14,8 +15,11 @@ export function HomePage() {
   const name = useDeviceName()
   const { battery, charging, connection } = s.mouse
   const desktop = s.shell === "desktop"
-  const mouseUrl = mouseImageFor(s.caps.family)
+  const mouseUrl = mouseImageFor(s.caps.image).url
   const wireless = s.caps.family === "x6" ? "Dongle 2.4 GHz" : "Receptor 2.4 GHz"
+  // celulares, Firefox y Safari no tienen WebHID: no se puede hablar con el mouse
+  const noWebHid = LIVE && !isTauri() && !hasWebHid()
+  const mobile = typeof navigator !== "undefined" && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
 
   return (
     <div className="relative flex h-full flex-col items-center justify-center overflow-hidden pb-6">
@@ -96,7 +100,16 @@ export function HomePage() {
         animate={{ opacity: 1 }}
         transition={{ delay: 0.25 }}
       >
-        {!s.connected && !desktop ? (
+        {noWebHid ? (
+          <div className="max-w-[460px] rounded-[14px] border border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-center text-[14px] leading-relaxed text-[var(--fg-2)]">
+            <div className="mb-1 font-bold text-[var(--fg)]">
+              {mobile ? "En el celular no se puede conectar el mouse" : "Este navegador no puede conectar el mouse"}
+            </div>
+            Nexo usa WebHID, que solo existe en Chrome y Edge de computadora (Windows, Mac, Linux o ChromeOS).
+            {mobile ? " Los navegadores de Android y iPhone no lo tienen." : " Firefox y Safari no lo tienen."} Abrí esta
+            página en una PC o instalá Nexo para Windows.
+          </div>
+        ) : !s.connected && !desktop ? (
           <Button variant="primary" size="lg" onClick={s.connect}>
             <IconPlug size={16} /> Conectar mouse
           </Button>

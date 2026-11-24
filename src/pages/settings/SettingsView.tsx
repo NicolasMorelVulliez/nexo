@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react"
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
 import { isTauri } from "../../device/transport"
+import { checkForUpdate, installUpdate } from "../../device/updates"
 import { useDeviceName, useStore, type FontPreset, type ThemeMode } from "../../device/store"
 import type { SettingsSection, Wallpaper } from "../../mockup/params"
 import { FONT_PRESET_LABEL, FONT_STACKS, isFontAvailable, loadCustomFont } from "../../lib/fonts"
@@ -725,13 +726,28 @@ function AboutPage() {
             <div>
               <div className="text-[24px] font-bold">Nexo</div>
               <div className="text-[13.5px] text-[var(--fg-2)]">
-                Versión 0.2.0 · {desktop ? (s.app.installMode === "installed" ? "Instalada" : "Portable") : "Web"}
+                Versión 0.2.1 · {desktop ? (s.app.installMode === "installed" ? "Instalada" : "Portable") : "Web"}
               </div>
             </div>
           </div>
-          <div className="mt-5 flex gap-2">
-            <Button variant="primary">Buscar actualizaciones</Button>
-            <Button variant="ghost">Licencias</Button>
+          <div className="mt-5 flex items-center gap-3">
+            {!desktop ? (
+              <span className="text-[13px] text-[var(--fg-2)]">La versión web se actualiza sola.</span>
+            ) : s.appUpdate ? (
+              <Button variant="primary" disabled={s.updateState === "installing"} onClick={() => void installUpdate()}>
+                {s.updateState === "installing" ? "Actualizando…" : `Instalar la versión ${s.appUpdate.version}`}
+              </Button>
+            ) : (
+              <Button variant="primary" disabled={s.updateState === "checking"} onClick={() => void checkForUpdate()}>
+                {s.updateState === "checking" ? "Buscando…" : "Buscar actualizaciones"}
+              </Button>
+            )}
+            {desktop && s.updateState === "uptodate" && !s.appUpdate && (
+              <span className="text-[13px] text-[var(--fg-2)]">Estás en la última versión.</span>
+            )}
+            {desktop && s.updateState === "error" && (
+              <span className="text-[13px] text-[var(--danger)]">No se pudo consultar GitHub.</span>
+            )}
           </div>
         </Card>
         <Card title="Dispositivo">

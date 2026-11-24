@@ -9,6 +9,7 @@
 //   &flyout=1 &tooltip=1 &charging=1 &battery=NN
 //   &device=x6|es21       mouse simulado (por defecto x6)
 //   &shot=1               oculta el selector (para capturas)
+//   ?panel=1              panel rápido de la bandeja (lo abre la app de escritorio en su propia ventana)
 
 export type Tab = "home" | "device" | "settings"
 export type DeviceSection = "buttons" | "dpi" | "performance" | "params" | "lighting"
@@ -50,6 +51,7 @@ export const params = {
   wallpaper: ((w) => (w === "glass" || w === "liquid" ? "glass" : w === "plain" ? "plain" : "dots"))(wallpaper) as Wallpaper,
   glassColor: /^[0-9a-f]{6}$/i.test(q.get("glass") ?? "") ? `#${q.get("glass")}` : "#050506",
   flyout: q.get("flyout") === "1",
+  panel: q.get("panel") === "1",
   tooltip: q.get("tooltip") === "1",
   charging: q.get("charging") === "1",
   device: (q.get("device") === "es21" ? "es21" : "x6") as "x6" | "es21",

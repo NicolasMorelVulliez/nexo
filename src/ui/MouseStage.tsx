@@ -6,27 +6,8 @@ import { useStore } from "../device/store"
 import { rgbToHex } from "../lib/util"
 import { mouseImageFor } from "./mouseImage"
 
-/** Relación de aspecto de la foto recortada (422×767). */
-export const MOUSE_ASPECT = 422 / 767
-
-type Spot = { x: number; y: number; side: "l" | "r" }
-/** Posición de cada botón sobre la foto del X6 (% del ancho / alto) y lado de su etiqueta. */
-const HOTSPOT_X6: Partial<Record<ButtonId, Spot>> = {
-  left: { x: 27, y: 13, side: "l" },
-  middle: { x: 50, y: 21, side: "r" },
-  right: { x: 74, y: 33, side: "r" },
-  side1: { x: 4.6, y: 34.5, side: "l" },
-  side2: { x: 4.6, y: 51, side: "r" },
-}
-/** Lo mismo sobre la silueta genérica (mouses RAWM), con el botón de DPI. */
-const HOTSPOT_GENERIC: Partial<Record<ButtonId, Spot>> = {
-  left: { x: 28, y: 12, side: "l" },
-  middle: { x: 50, y: 15.5, side: "r" },
-  right: { x: 72, y: 26, side: "r" },
-  dpi: { x: 50, y: 28.5, side: "l" },
-  side1: { x: 5.5, y: 41.5, side: "l" },
-  side2: { x: 5.5, y: 51.5, side: "l" },
-}
+/** Proporción de la imagen del mouse activo (ancho / alto). */
+const currentAspect = () => mouseImageFor(useStore.getState().caps.image).aspect
 
 /** Margen lateral que necesita el escenario cuando muestra etiquetas. */
 export const LABEL_SPACE = 150
@@ -47,12 +28,13 @@ export function MouseStage({
   onSelect?: (b: ButtonId) => void
   dim?: boolean
 }) {
-  const family = useStore((s) => s.caps.family)
+  const image = mouseImageFor(useStore((s) => s.caps.image))
   const buttons = useStore((s) => s.caps.buttons)
-  const mouseUrl = mouseImageFor(family)
-  const HOTSPOT = family === "x6" ? HOTSPOT_X6 : HOTSPOT_GENERIC
+  const mouseUrl = image.url
+  const HOTSPOT = image.hotspots
+  const glow = image.glow
   const imgH = Math.max(120, height)
-  const imgW = imgH * MOUSE_ASPECT
+  const imgW = imgH * image.aspect
   const side = labels ? LABEL_SPACE : 0
   const lit = light && light.mode !== "off" && !dim
   const color = light ? rgbToHex(light.color) : "#ffffff"
@@ -125,10 +107,10 @@ export function MouseStage({
           <div
             className="pointer-events-none absolute rounded-full mix-blend-screen"
             style={{
-              left: "41%",
-              top: "8.5%",
-              width: "18%",
-              height: "18%",
+              left: `${glow.x - glow.size / 2}%`,
+              top: `${glow.y - glow.size / 2}%`,
+              width: `${glow.size}%`,
+              height: `${glow.size}%`,
               background:
                 light.mode === "rainbow"
                   ? "conic-gradient(#ff3b3b, #f5ff3b, #3bff6a, #3be4ff, #c43bff, #ff3b3b)"
@@ -189,6 +171,6 @@ export function MouseStage({
 /** Alto de mouse que entra en una caja (contemplando etiquetas laterales si las hay). */
 export function fitMouse(box: { width: number; height: number }, withLabels = false, maxH = 9999) {
   const side = withLabels ? LABEL_SPACE : 0
-  const byWidth = (box.width - side * 2) / MOUSE_ASPECT
+  const byWidth = (box.width - side * 2) / currentAspect()
   return Math.max(120, Math.min(box.height - 12, byWidth, maxH))
 }

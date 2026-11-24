@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react"
 import { useEffect, useState, type ComponentType, type ReactNode } from "react"
 import { refreshFromMouse } from "../device/live"
+import { installUpdate } from "../device/updates"
 import { useDeviceName, useStore } from "../device/store"
 import type { DeviceSection } from "../mockup/params"
 import { ButtonsPage } from "../pages/Buttons"
@@ -101,6 +102,19 @@ function TopBar({ trailing }: { trailing?: ReactNode }) {
       )}
 
       <div className="h-full flex-1" data-tauri-drag-region />
+
+      {s.appUpdate && (
+        <button
+          type="button"
+          onClick={() => void installUpdate()}
+          disabled={s.updateState === "installing"}
+          className="flex h-[30px] items-center gap-1.5 rounded-[6px] border-0 px-3 text-[13px] font-semibold"
+          style={{ background: "color-mix(in srgb, var(--accent) 22%, transparent)", color: "var(--accent)" }}
+          title={s.appUpdate.notes ?? undefined}
+        >
+          {s.updateState === "installing" ? "Actualizando Nexo…" : `Nexo ${s.appUpdate.version} disponible · Actualizar`}
+        </button>
+      )}
 
       {s.error && (
         <span

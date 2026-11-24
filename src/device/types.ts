@@ -89,6 +89,8 @@ export interface Capabilities {
   remap: boolean
   /** botones remapeables, en orden */
   buttons: ButtonId[]
+  /** imagen del mouse (ver ui/mouseImage.ts) */
+  image: "x6" | "es21" | "generic"
   /** el mouse informa la batería al leer el estado */
   battery: boolean
 }

@@ -11,6 +11,8 @@
 import type { DeviceSession } from "../devices/driver"
 import { displayName, isGenericProduct, normalizeIdentity } from "./identity"
 import { loadPrefs, savePrefs } from "./persist"
+import { servePanel } from "./panel"
+import { listenUpdates } from "./updates"
 import { hooks, LIVE, useStore } from "./store"
 import { connectTauri, type AppInfo, type BatteryEvent } from "./tauri"
 import { isTauri, type Transport } from "./transport"
@@ -148,7 +150,7 @@ function startWebBattery() {
   }, get().app.pollSeconds * 1000)
 }
 
-async function setupTauri() {
+async function setupTauri(panel: boolean) {
   const { listen } = await import("@tauri-apps/api/event")
   const { invoke } = await import("@tauri-apps/api/core")
   listen<BatteryEvent>("battery", ({ payload }) => {
@@ -165,6 +167,10 @@ async function setupTauri() {
     applyingRemote = false
     if (!get().connected && get().status !== "connecting") connect(false)
   })
+  if (!panel) {
+    listenUpdates()
+    servePanel()
+  }
   const info = await invoke<AppInfo>("app_info")
   set((s) => ({ app: { ...s.app, installMode: info.portable ? "portable" : "installed" } }))
   const pushTray = () => {
@@ -188,7 +194,7 @@ async function setupTauri() {
 
 /* ───────────── Arranque ───────────── */
 
-export function startLive() {
+export function startLive(opts: { panel?: boolean } = {}) {
   if (!LIVE) return
   lastFamily = loadPrefs().lastFamily
   hooks.connect = (interactive) => void connect(interactive)
@@ -226,7 +232,7 @@ export function startLive() {
   })
 
   if (isTauri()) {
-    setupTauri()
+    setupTauri(!!opts.panel)
     connect(false)
   } else {
     // Si el navegador ya tiene permiso para el mouse, reconecta sin pedir nada.

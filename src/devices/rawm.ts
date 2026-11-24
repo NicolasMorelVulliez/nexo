@@ -141,6 +141,7 @@ export function rawmCaps(model: RawmModel): Capabilities {
     light: { modes: ["off", "static", "rainbow", "dpi"], palette: "rgb3", speed: false, brightness: model.brightness, autoOff: true, readable: true },
     remap: true,
     buttons: RAWM_BUTTONS,
+    image: model.name === "ES21" ? "es21" : "generic",
     battery: true,
   }
 }

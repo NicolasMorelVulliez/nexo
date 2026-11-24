@@ -11,6 +11,7 @@ import {
 } from "../mockup/params"
 import type { DeviceIdentity } from "./identity"
 import { createMockMouse, DEFAULT_REMAPS } from "./mock"
+import type { UpdateInfo, UpdateState } from "./updates"
 import { loadPrefs, type Persisted } from "./persist"
 import { isTauri } from "./transport"
 import type { ButtonId, Capabilities, LightState, MouseState } from "./types"
@@ -68,6 +69,9 @@ interface StoreState {
   live: boolean
   status: "idle" | "connecting" | "ready" | "error"
   error: string | null
+  /** versión nueva de la app de escritorio, si hay */
+  appUpdate: UpdateInfo | null
+  updateState: UpdateState
   setIdentityName: (vendor: string, product: string) => void
 
   setShell: (s: Shell) => void
@@ -188,6 +192,8 @@ export const useStore = create<StoreState>((set) => ({
   live: LIVE,
   status: "idle",
   error: null,
+  appUpdate: null,
+  updateState: "idle",
 
   setShell: (shell) => set({ shell }),
   goHome: () => set({ tab: "home" }),

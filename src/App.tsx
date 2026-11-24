@@ -6,6 +6,7 @@ import { params } from "./mockup/params"
 import { Switcher } from "./mockup/Switcher"
 import { AppRoot } from "./shells/AppRoot"
 import { DesktopShell } from "./shells/DesktopShell"
+import { TrayPanel } from "./shells/TrayPanel"
 import { WindowControls } from "./shells/WindowControls"
 import { isTauri } from "./device/transport"
 
@@ -52,14 +53,16 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion={reduceMotion ? "always" : "user"}>
-      {isTauri() ? (
+      {params.panel ? (
+        <TrayPanel />
+      ) : isTauri() ? (
         <AppRoot trailing={<WindowControls />} />
       ) : shell === "web" ? (
         <AppRoot />
       ) : (
         <DesktopShell />
       )}
-      {params.mockup && !params.shot && <Switcher />}
+      {params.mockup && !params.shot && !params.panel && <Switcher />}
     </MotionConfig>
   )
 }
